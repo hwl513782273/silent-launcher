@@ -1,0 +1,11 @@
+# 编译产物
+SilentLauncher
+*.app/
+build/
+DerivedData/
+
+# 大体积分发包不进 git（仅作为 Release 附件上传）
+*.dmg
+
+# macOS
+.DS_Store
