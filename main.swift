@@ -36,6 +36,7 @@ let configPath = supportDir + "/config.json"
 let mainLogPath = NSHomeDirectory() + "/Library/Logs/开机静默启动器.log"
 let launchdLogPath = NSHomeDirectory() + "/Library/Logs/开机静默启动器-launchd.log"
 let appVersion = "20"
+let appCopyright = "Copyright © 2026 hwl513782273. 基于 MIT 许可证开源发布。"
 
 // MARK: - 日志
 func logLine(_ msg: String, to path: String) {
@@ -294,7 +295,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func about(_ s: NSButton) {
         let a = NSAlert()
         a.messageText = "静默启动管理器 v\(appVersion)"
-        a.informativeText = "登录时自动隐藏指定应用窗口。\n本源码为按行为重建版（原 main.swift 已遗失）。"
+        a.informativeText = """
+        登录时自动隐藏指定应用窗口。
+        本源码为按行为重建版（原 main.swift 已遗失）。
+
+        \(appCopyright)
+        开源许可证：MIT
+        仓库：https://github.com/hwl513782273/silent-launcher
+        """
         a.runModal()
     }
 }

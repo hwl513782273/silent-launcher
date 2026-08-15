@@ -42,18 +42,26 @@
 bash build_1015.sh
 ```
 
-脚本会：用 `swiftc` 编译 `main.swift` 为 **x86_64 @ macOS 10.15** → 组装 `.app` 并嵌入 Swift 运行时（传递闭包，含 CoreGraphics 等）→ 打包为 `10.15-静默启动管理器-V20.dmg`。
+脚本会：用 `swiftc` 编译 `main.swift` 为 **x86_64 @ macOS 10.15** → 组装 `.app` 并嵌入 Swift 运行时（传递闭包，含 CoreGraphics 等）→ 打包为 `10.15-silent-launcher-x86_64.dmg`。
 `build_1015.sh` 顶部常量可改（`APP_NAME` / `APP_VERSION` / `APP_BUNDLE_ID` / `OUT_DIR`）。
 
-> 兼容 macOS 12+ 的 universal 包另走原生 arm64 构建（不在本脚本内），详见发行版。
+> 兼容 macOS 12+ 的 universal 包用 `bash build_12.sh` 构建（arm64 + x86_64 原生，无嵌入运行时），产出 `12-silent-launcher-universal.dmg`。
+> 两个脚本产出的 DMG 均采用发布命名格式：**`<支持最低版本>-silent-launcher-<架构>`**。
 
 ## 发行包（DMG）
 
-- `10.15-静默启动管理器-V20.dmg`（x86_64，macOS 10.15+，需 Rosetta 2）
-- `12-静默启动管理器-V20.dmg`（universal，macOS 12+）
+发布命名格式：`<支持最低版本>-silent-launcher-<架构>`
+
+- `10.15-silent-launcher-x86_64.dmg`（x86_64，macOS 10.15+，需 Rosetta 2）
+- `12-silent-launcher-universal.dmg`（universal = arm64 + x86_64，macOS 12+）
+
+> 包内 `.app` 仍使用中文显示名「静默启动管理器」（与 LaunchAgent 路径一致），仅对外发布的 DMG 文件名采用上述英文格式。
 
 安装：把 `.app` 拖进「应用程序」，首次打开后点「设为开机启动」即可。
 
-## 许可证
+## 版权与许可证
 
-自用工具，无明确许可证。
+版权所有 © 2026 hwl513782273。
+
+本软件以 **MIT 许可证** 开源发布，详见仓库根目录 [LICENSE](LICENSE) 文件。
+在 App 内点「关于」亦可查看版权与许可证信息。

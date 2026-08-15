@@ -30,14 +30,17 @@ FW="$APP/Contents/Frameworks"
 echo ">> TOOLCHAIN_SWIFT = $TOOLCHAIN_SWIFT"
 [ -d "$TOOLCHAIN_SWIFT" ] || { echo "✗ toolchain swift dir missing"; exit 1; }
 
+# 0) Create bundle dirs first (swiftc/ld will NOT create parent dirs)
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$FW"
+[ -f "$ICON" ] && cp "$ICON" "$APP/Contents/Resources/"
+
 # 1) Compile pure x86_64 @ 10.15 (NEVER two -target flags -> arm64-only)
 echo ">> compiling x86_64 @ $DEPLOY_TARGET"
 swiftc -target "x86_64-apple-macosx$DEPLOY_TARGET" -O -o "$BIN" "$SRC"
 lipo -info "$BIN"
 
 # 2) Assemble bundle
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$FW"
-[ -f "$ICON" ] && cp "$ICON" "$APP/Contents/Resources/"
+echo ">> assembling bundle"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -53,6 +56,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>$DEPLOY_TARGET</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>Copyright © 2026 hwl513782273. 基于 MIT 许可证开源发布。</string>
 </dict>
 </plist>
 PLIST
@@ -97,8 +101,8 @@ embed_swift_runtime "$BIN" "$FW"
 echo ">> verifying embedded deps all resolve to @rpath:"
 otool -L "$BIN" | grep libswift || true
 
-# 4) Package DMG with CLEAN app name (matches LaunchAgent path)
-DMG="$OUT_DIR/${X64_PREFIX}${APP_NAME}-V${APP_VERSION}.dmg"
+# 4) Package DMG — published filename format: <min-version>-silent-launcher-<arch>
+DMG="$OUT_DIR/10.15-silent-launcher-x86_64.dmg"
 STAGE=$(mktemp -d)
 cp -R "$APP" "$STAGE/$APP_NAME.app"        # rename: drop the -10.15 suffix
 ln -s /Applications "$STAGE/Applications"
