@@ -21,6 +21,8 @@
 - **关于菜单**：dylib 注入在 app 菜单追加「关于」「退出」项（原版无此菜单，使用 AppleScript 弹窗渲染版本与 MIT 许可信息）。
 - **首次启动权限引导**：首次启动弹一次说明框，并直接拉起系统「辅助功能」授权窗、触发「自动化」授权，引导用户完成必要授权。
 
+> **平台说明 Platform Note：本工具为 macOS 原生应用（Swift + AppKit 打包为 `.app` / `.dmg`），暂无 Windows / Linux 版本。**
+
 ### 所需权限
 
 - **辅助功能（必须）**：用于自动隐藏指定 App 的窗口。授权后需【退出并重新打开】本应用才生效。
@@ -61,6 +63,37 @@ bash build_v21_from_v20.sh
 - **Intel Mac / macOS 10.15+**：下载 `10.15-silent-launcher-x86_64.dmg`（x86_64，在 Apple Silicon 上需 Rosetta 2）。
 
 两份包均**未签名、未公证**（ad-hoc 签名仅用于满足 DYLD 注入），首次打开可能触发 Gatekeeper，需在「系统设置 ▸ 隐私与安全性」中允许。应用内功能在 macOS 11–15 上可用。
+
+### 能力对照 / Capabilities
+
+能力 / Capability | 实现 / How | 说明 / Notes
+---|---|---
+登录静默隐藏 / Silent hide | LaunchAgent `--silent` 循环 | 登录后按间隔隐藏勾选应用窗口
+图形化管理 / GUI | 原生 AppKit 窗口 | 勾选 / 增删 / 改名 / 改 Bundle ID、总开关、时长、间隔、「立即隐藏」测试
+开机自启 / Auto-start | `~/Library/LaunchAgents` plist | `RunAtLoad` + `--silent`，无需密码
+兜底强关 / Fallback | AppleScript | 普通 `hide` 失效时强制关闭（如菜单栏类应用）
+首次授权引导 / Guide | dylib 注入 | 首次启动弹窗 + 拉起系统辅助功能 / 自动化授权
+关于 / 退出菜单 / About | dylib 注入 | 补上原版缺失菜单，弹窗展示版本与 MIT 许可
+
+## 为什么选静默启动管理器 / Why SilentLauncher
+
+窗口管理类工具的思路各异，静默启动管理器聚焦「开机即静默」这一具体场景，并把体验做到开箱即用：
+
+- **原生 GUI，不是脚本或命令行**：勾选启用 / 增删 / 改名 / 改 Bundle ID，总开关、静默持续秒数、扫描间隔、「立即隐藏」一键测试，全部在图形界面完成，无需手写 plist 或记命令。
+- **首次启动一步授权**：打开即弹引导说明，并直接拉起系统「辅助功能」授权窗、触发「自动化」授权，一次讲清所需权限与设置路径，免去四处查教程。
+- **登录即静默循环**：LaunchAgent 以 `--silent` 在登录后持续按间隔隐藏勾选的应用窗口；普通隐藏失效时（如菜单栏类应用）自动用 AppleScript 兜底强制关闭。
+- **完整版权与关于信息**：通过注入补上原版缺失的「关于 / 退出」菜单，弹窗清晰展示版本与 MIT 许可，合规透明。
+- **零上网、零上传**：所有隐藏在本地完成，不联网、不读取或上传任何屏幕内容与文件。
+- **拖入即用**：把 `.app` 拖进「应用程序」，首次打开点「设为开机启动」即可，无需任何额外环境。
+
+Window-management tools take many forms; SilentLauncher focuses on the specific "silent at login" scenario and ships it ready to use:
+
+- **Native GUI, not scripts or CLI:** enable/disable, add/remove, rename, edit Bundle ID, global toggle, silent duration, scan interval, and a one-click "hide now" test — all in a graphical interface, no hand-written plists or commands.
+- **One-step permission setup on first launch:** a guide dialog appears on open and directly triggers the system Accessibility prompt and the Automation prompt, explaining every required permission and where to set it.
+- **Silent loop right after login:** a LaunchAgent runs `--silent` to hide checked app windows at intervals after login; when a normal hide fails (e.g. menu-bar apps), an AppleScript fallback force-closes the window.
+- **Complete About & license info:** an injected "About / Quit" menu fills the original app's gap, clearly showing the version and MIT license.
+- **No network, no uploads:** all hiding is local; the app never connects to the network or reads/uploads any screen content or files.
+- **Drag-and-use:** drop the `.app` into Applications and click "Set as login item" on first open — no extra setup required.
 
 ## English
 
@@ -109,25 +142,16 @@ The script extracts the `.app` from the original V20 DMG, bumps `Info.plist` (ve
 
 Both builds are **unsigned and unnotarized** (ad-hoc signing only, to keep DYLD injection working) and may trigger Gatekeeper on first open; allow the app in System Settings ▸ Privacy & Security. In-app features work on macOS 11–15.
 
-## 为什么选静默启动管理器 / Why SilentLauncher
+### Capabilities
 
-窗口管理类工具的思路各异，静默启动管理器聚焦「开机即静默」这一具体场景，并把体验做到开箱即用：
-
-- **原生 GUI，不是脚本或命令行**：勾选启用 / 增删 / 改名 / 改 Bundle ID，总开关、静默持续秒数、扫描间隔、「立即隐藏」一键测试，全部在图形界面完成，无需手写 plist 或记命令。
-- **首次启动一步授权**：打开即弹引导说明，并直接拉起系统「辅助功能」授权窗、触发「自动化」授权，一次讲清所需权限与设置路径，免去四处查教程。
-- **登录即静默循环**：LaunchAgent 以 `--silent` 在登录后持续按间隔隐藏勾选的应用窗口；普通隐藏失效时（如菜单栏类应用）自动用 AppleScript 兜底强制关闭。
-- **完整版权与关于信息**：通过注入补上原版缺失的「关于 / 退出」菜单，弹窗清晰展示版本与 MIT 许可，合规透明。
-- **零上网、零上传**：所有隐藏在本地完成，不联网、不读取或上传任何屏幕内容与文件。
-- **拖入即用**：把 `.app` 拖进「应用程序」，首次打开点「设为开机启动」即可，无需任何额外环境。
-
-Window-management tools take many forms; SilentLauncher focuses on the specific "silent at login" scenario and ships it ready to use:
-
-- **Native GUI, not scripts or CLI:** enable/disable, add/remove, rename, edit Bundle ID, global toggle, silent duration, scan interval, and a one-click "hide now" test — all in a graphical interface, no hand-written plists or commands.
-- **One-step permission setup on first launch:** a guide dialog appears on open and directly triggers the system Accessibility prompt and the Automation prompt, explaining every required permission and where to set it.
-- **Silent loop right after login:** a LaunchAgent runs `--silent` to hide checked app windows at intervals after login; when a normal hide fails (e.g. menu-bar apps), an AppleScript fallback force-closes the window.
-- **Complete About & license info:** an injected "About / Quit" menu fills the original app's gap, clearly showing the version and MIT license.
-- **No network, no uploads:** all hiding is local; the app never connects to the network or reads/uploads any screen content or files.
-- **Drag-and-use:** drop the `.app` into Applications and click "Set as login item" on first open — no extra setup required.
+Capability | How | Notes
+---|---|---
+Silent hide at login | LaunchAgent `--silent` loop | hides checked app windows at intervals after login
+GUI management | native AppKit window | enable/disable, add/remove, rename, edit Bundle ID, global toggle, duration, interval, "hide now" test
+Login auto-start | `~/Library/LaunchAgents` plist | `RunAtLoad` + `--silent`, no password
+AppleScript fallback | AppleScript | force-closes when a normal `hide` fails (e.g. menu-bar apps)
+First-launch guide | dylib injection | one-time dialog + system Accessibility / Automation prompts
+About / Quit menu | dylib injection | fills the original app's missing menu; shows version and MIT license
 
 ## 隐私与安全 / Privacy and security
 
