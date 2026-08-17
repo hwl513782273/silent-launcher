@@ -75,7 +75,7 @@ bash build_v21_from_v20.sh
 首次授权引导 / Guide | dylib 注入 | 首次启动弹窗 + 拉起系统辅助功能 / 自动化授权
 关于 / 退出菜单 / About | dylib 注入 | 补上原版缺失菜单，弹窗展示版本与 MIT 许可
 
-## 为什么选静默启动管理器 / Why SilentLauncher
+### 为什么选静默启动管理器
 
 窗口管理类工具的思路各异，静默启动管理器聚焦「开机即静默」这一具体场景，并把体验做到开箱即用：
 
@@ -85,15 +85,6 @@ bash build_v21_from_v20.sh
 - **完整版权与关于信息**：通过注入补上原版缺失的「关于 / 退出」菜单，弹窗清晰展示版本与 MIT 许可，合规透明。
 - **零上网、零上传**：所有隐藏在本地完成，不联网、不读取或上传任何屏幕内容与文件。
 - **拖入即用**：把 `.app` 拖进「应用程序」，首次打开点「设为开机启动」即可，无需任何额外环境。
-
-Window-management tools take many forms; SilentLauncher focuses on the specific "silent at login" scenario and ships it ready to use:
-
-- **Native GUI, not scripts or CLI:** enable/disable, add/remove, rename, edit Bundle ID, global toggle, silent duration, scan interval, and a one-click "hide now" test — all in a graphical interface, no hand-written plists or commands.
-- **One-step permission setup on first launch:** a guide dialog appears on open and directly triggers the system Accessibility prompt and the Automation prompt, explaining every required permission and where to set it.
-- **Silent loop right after login:** a LaunchAgent runs `--silent` to hide checked app windows at intervals after login; when a normal hide fails (e.g. menu-bar apps), an AppleScript fallback force-closes the window.
-- **Complete About & license info:** an injected "About / Quit" menu fills the original app's gap, clearly showing the version and MIT license.
-- **No network, no uploads:** all hiding is local; the app never connects to the network or reads/uploads any screen content or files.
-- **Drag-and-use:** drop the `.app` into Applications and click "Set as login item" on first open — no extra setup required.
 
 ## English
 
@@ -152,6 +143,17 @@ Login auto-start | `~/Library/LaunchAgents` plist | `RunAtLoad` + `--silent`, no
 AppleScript fallback | AppleScript | force-closes when a normal `hide` fails (e.g. menu-bar apps)
 First-launch guide | dylib injection | one-time dialog + system Accessibility / Automation prompts
 About / Quit menu | dylib injection | fills the original app's missing menu; shows version and MIT license
+
+### Why SilentLauncher
+
+Window-management tools take many forms; SilentLauncher focuses on the specific "silent at login" scenario and ships it ready to use:
+
+- **Native GUI, not scripts or CLI:** enable/disable, add/remove, rename, edit Bundle ID, global toggle, silent duration, scan interval, and a one-click "hide now" test — all in a graphical interface, no hand-written plists or commands.
+- **One-step permission setup on first launch:** a guide dialog appears on open and directly triggers the system Accessibility prompt and the Automation prompt, explaining every required permission and where to set it.
+- **Silent loop right after login:** a LaunchAgent runs `--silent` to hide checked app windows at intervals after login; when a normal hide fails (e.g. menu-bar apps), an AppleScript fallback force-closes the window.
+- **Complete About & license info:** an injected "About / Quit" menu fills the original app's gap, clearly showing the version and MIT license.
+- **No network, no uploads:** all hiding is local; the app never connects to the network or reads/uploads any screen content or files.
+- **Drag-and-use:** drop the `.app` into Applications and click "Set as login item" on first open — no extra setup required.
 
 ## 隐私与安全 / Privacy and security
 
