@@ -76,11 +76,11 @@ xattr -cr "$APP_12"
 codesign --force --sign - "$RES_12/about_inject.dylib" 2>/dev/null
 codesign --force --deep --sign - "$APP_12"
 
-rm -f "$OUTDIR/12-静默启动管理器-v22-universal.dmg"
+rm -f "$OUTDIR/12-silent-launcher-v22-universal.dmg"
 ln -s /Applications "$STAGE_12/Applications"
-hdiutil create -volname "静默启动管理器 V22" -srcfolder "$STAGE_12" -ov -format UDZO "$OUTDIR/12-静默启动管理器-v22-universal.dmg" 2>&1 | tail -1
+hdiutil create -volname "静默启动管理器 V22" -srcfolder "$STAGE_12" -ov -format UDZO "$OUTDIR/12-silent-launcher-v22-universal.dmg" 2>&1 | tail -1
 hdiutil detach "$MNT_12" -quiet
-echo "OK 12-静默启动管理器-v22-universal.dmg"
+echo "OK 12-silent-launcher-v22-universal.dmg"
 
 # ---- 10.15 x86_64 ----
 echo "--- [2/2] 10.15 x86_64 ---"
@@ -120,12 +120,12 @@ xattr -cr "$APP_15"
 codesign --force --sign - "$RES_15/about_inject.dylib" 2>/dev/null
 codesign --force --deep --sign - "$APP_15"
 
-rm -f "$OUTDIR/10.15-静默启动管理器-v22-x86_64.dmg"
+rm -f "$OUTDIR/10.15-silent-launcher-v22-x86_64.dmg"
 ln -s /Applications "$STAGE_15/Applications"
-hdiutil create -volname "静默启动管理器 V22" -srcfolder "$STAGE_15" -ov -format UDZO "$OUTDIR/10.15-静默启动管理器-v22-x86_64.dmg" 2>&1 | tail -1
+hdiutil create -volname "静默启动管理器 V22" -srcfolder "$STAGE_15" -ov -format UDZO "$OUTDIR/10.15-silent-launcher-v22-x86_64.dmg" 2>&1 | tail -1
 hdiutil detach "$MNT_15" -quiet
-echo "OK 10.15-静默启动管理器-v22-x86_64.dmg"
+echo "OK 10.15-silent-launcher-v22-x86_64.dmg"
 
 echo ""
 echo "=== DONE ==="
-ls -lh "$OUTDIR/"*静默启动管理器*.dmg
+ls -lh "$OUTDIR/"*silent-launcher*.dmg

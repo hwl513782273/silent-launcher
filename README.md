@@ -54,15 +54,15 @@ bash build_v21_from_v20.sh
 
 构建脚本会：从原版 V20 DMG 抽取 `.app` → 改 `Info.plist`（版本 20→22 + 注入版权）→ 写入 `about_inject.dylib` 与 `strings.txt` → 用壳脚本包裹 `DYLD_INSERT_LIBRARIES` → ad-hoc 重签 → 产出两份 DMG：
 
-- `12-静默启动管理器-v22-universal.dmg`（universal arm64 + x86_64，macOS 12+）
-- `10.15-静默启动管理器-v22-x86_64.dmg`（x86_64，macOS 10.15+，需 Rosetta 2）
+- `12-silent-launcher-v22-universal.dmg`（universal arm64 + x86_64，macOS 12+）
+- `10.15-silent-launcher-v22-x86_64.dmg`（x86_64，macOS 10.15+，需 Rosetta 2）
 
 > **自动继承旧配置**：首次启动时会自动把旧版（`开机静默启动器`）里的 `settings.json` / `config.json` 继承到新文件夹（`静默启动管理器`），并移除旧文件夹，避免改名后读空配置导致「全天静默 / 不按时间段」的问题。老用户升级无需手动迁移。
 
 ### macOS 版本选择
 
-- **Apple Silicon（M1 及更新）/ macOS 12+**：下载 `12-静默启动管理器-v22-universal.dmg`（原生 arm64 + x86_64）。
-- **Intel Mac / macOS 10.15+**：下载 `10.15-静默启动管理器-v22-x86_64.dmg`（x86_64，在 Apple Silicon 上需 Rosetta 2）。
+- **Apple Silicon（M1 及更新）/ macOS 12+**：下载 `12-silent-launcher-v22-universal.dmg`（原生 arm64 + x86_64）。
+- **Intel Mac / macOS 10.15+**：下载 `10.15-silent-launcher-v22-x86_64.dmg`（x86_64，在 Apple Silicon 上需 Rosetta 2）。
 
 两份包均**未签名、未公证**（ad-hoc 签名仅用于满足 DYLD 注入），首次打开可能触发 Gatekeeper，需在「系统设置 ▸ 隐私与安全性」中允许。应用内功能在 macOS 11–15 上可用。
 
@@ -132,8 +132,8 @@ The script extracts the `.app` from the original V20 DMG, bumps `Info.plist` (ve
 
 ### Choose a macOS build
 
-- **Apple Silicon (M1 or newer) / macOS 12+:** use `12-静默启动管理器-v22-universal.dmg` (native arm64 + x86_64).
-- **Intel Mac / macOS 10.15+:** use `10.15-静默启动管理器-v22-x86_64.dmg` (x86_64; needs Rosetta 2 on Apple Silicon).
+- **Apple Silicon (M1 or newer) / macOS 12+:** use `12-silent-launcher-v22-universal.dmg` (native arm64 + x86_64).
+- **Intel Mac / macOS 10.15+:** use `10.15-silent-launcher-v22-x86_64.dmg` (x86_64; needs Rosetta 2 on Apple Silicon).
 
 Both builds are **unsigned and unnotarized** (ad-hoc signing only, to keep DYLD injection working) and may trigger Gatekeeper on first open; allow the app in System Settings ▸ Privacy & Security. In-app features work on macOS 11–15.
 
