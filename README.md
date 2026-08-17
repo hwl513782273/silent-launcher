@@ -57,7 +57,7 @@ bash build_v21_from_v20.sh
 - `12-silent-launcher-v22-universal.dmg`（universal arm64 + x86_64，macOS 12+）
 - `10.15-silent-launcher-v22-x86_64.dmg`（x86_64，macOS 10.15+，需 Rosetta 2）
 
-> **自动继承旧配置**：首次启动时会自动把旧版（`开机静默启动器`）里的 `settings.json` / `config.json` 继承到新文件夹（`静默启动管理器`），并移除旧文件夹，避免改名后读空配置导致「全天静默 / 不按时间段」的问题。老用户升级无需手动迁移。
+> **自动继承旧配置**：首次启动时会自动把旧版（`开机静默启动器`）里的 `settings.json` / `config.json` 继承到新文件夹（`静默启动管理器`），并将旧文件夹改名留存为 `.old`，避免改名后读空配置导致「全天静默 / 不按时间段」的问题。老用户升级无需手动迁移。详见下方「升级行为说明」。
 
 ### macOS 版本选择
 
@@ -65,6 +65,23 @@ bash build_v21_from_v20.sh
 - **Intel Mac / macOS 10.15+**：下载 `10.15-silent-launcher-v22-x86_64.dmg`（x86_64，在 Apple Silicon 上需 Rosetta 2）。
 
 两份包均**未签名、未公证**（ad-hoc 签名仅用于满足 DYLD 注入），首次打开可能触发 Gatekeeper，需在「系统设置 ▸ 隐私与安全性」中允许。应用内功能在 macOS 11–15 上可用。
+
+### 升级行为说明（V21 → V22 改名版）
+
+安装后**首次启动**会自动执行一次旧配置迁移，目的是修复「改名后读空配置 → 全天静默 / 不按时间段」的问题。迁移逻辑基于你机器上是否残留**旧名文件夹** `~/Library/Application Support/开机静默启动器/`：
+
+| 你的升级前状态 | V22 首次启动行为 |
+|---|---|
+| 装过旧名版（`开机静默启动器`）→ 装 V22 | ✅ 找到旧文件夹 → 把其中**真实正确的** `settings.json` + `config.json` **覆盖**进新文件夹 `静默启动管理器/` → 旧文件夹改名 `开机静默启动器.old` 留存（不再被读取，可随时恢复） |
+| 全新安装（从没装过本工具） | 无旧文件夹 → 不迁移，使用 App 默认配置（正常） |
+| 只装过 V21 改名版、且从没装过旧名版 | 机器无旧名文件夹 → 迁移跳过；但你从没拥有过正确配置，等同于全新初始化，无影响 |
+
+要点：
+
+- **错误配置会被覆盖清除**：新文件夹里那份 V21 留下的错误默认 `settings.json` / `config.json` 会被你的真实配置顶替。
+- **旧文件夹不删除**：改名 `.old` 仅让其不再被读取，需要回退时原配置仍在。
+- **幂等**：迁移完成后旧文件夹已改名，再次启动 `oldDir` 不存在 → 直接跳过，不会反复覆盖或出错。
+- 老用户升级**无需任何手动操作**，打开即用。
 
 ### 能力对照 / Capabilities
 
@@ -128,7 +145,7 @@ bash build_v21_from_v20.sh
 
 The script extracts the `.app` from the original V20 DMG, bumps `Info.plist` (version 20→22 + copyright), copies `about_inject.dylib` and `strings.txt`, wraps the binary with a `DYLD_INSERT_LIBRARIES` shell shim, ad-hoc re-signs, and produces two DMGs (see above).
 
-> **Auto-migrate legacy config:** on first launch it automatically inherits `settings.json` / `config.json` from the old folder (`开机静默启动器`) into the new one (`静默启动管理器`) and removes the old folder, so upgrading never falls back to empty/default config.
+> **Auto-migrate legacy config:** on first launch it automatically inherits `settings.json` / `config.json` from the old folder (`开机静默启动器`) into the new one (`静默启动管理器`) and renames the old folder to `.old`, so upgrading never falls back to empty/default config. See "Upgrade behavior" below.
 
 ### Choose a macOS build
 
@@ -136,6 +153,23 @@ The script extracts the `.app` from the original V20 DMG, bumps `Info.plist` (ve
 - **Intel Mac / macOS 10.15+:** use `10.15-silent-launcher-v22-x86_64.dmg` (x86_64; needs Rosetta 2 on Apple Silicon).
 
 Both builds are **unsigned and unnotarized** (ad-hoc signing only, to keep DYLD injection working) and may trigger Gatekeeper on first open; allow the app in System Settings ▸ Privacy & Security. In-app features work on macOS 11–15.
+
+### Upgrade behavior (V21 → V22 rename build)
+
+On the **first launch after install**, the app runs a one-time legacy-config migration to fix the "rename broke config → silent all day / ignores schedule" bug. The migration is keyed on whether the **old-name folder** `~/Library/Application Support/开机静默启动器/` still exists on the machine:
+
+| Your state before upgrading | V22 first-launch behavior |
+|---|---|
+| Had the old-named build (`开机静默启动器`) → install V22 | ✅ Finds the old folder → copies the **real, correct** `settings.json` + `config.json` **over** into the new folder `静默启动管理器/` → renames the old folder to `开机静默启动器.old` (kept, no longer read, recoverable) |
+| Fresh install (never had the tool) | No old folder → no migration; uses the app default config (expected) |
+| Only had the V21 rename build, never the old name | No old-name folder → migration skipped; but you never had correct config anyway, so it's a no-op fresh start |
+
+Notes:
+
+- **Wrong config is overwritten:** the bad default `settings.json` / `config.json` left by V21 in the new folder is replaced by your real config.
+- **Old folder is not deleted:** renamed `.old` so it stops being read; your original config survives if you ever need to roll back.
+- **Idempotent:** once migrated, the old folder is renamed, so subsequent launches skip cleanly.
+- Existing users upgrade **with zero manual steps** — just open and use.
 
 ### Capabilities
 
