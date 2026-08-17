@@ -38,7 +38,7 @@
 4. 点「设为开机启动」，之后登录时即自动隐藏指定窗口。
 5. 点左上角菜单「关于」可查看版本与 MIT 许可信息。
 
-> ⚠️ **关于本仓库源码**：原项目 `main.swift` 在打包发布时遗失，本仓库的 `main.swift` 为**按可观察行为重建版**（配置结构、`--silent` 静默隐藏循环、GUI、AppleScript 兜底、LaunchAgent 自启等均依据原版表现重建，可能与原版存在细节差异）。V21 在原版 V20 二进制基础上仅做 dylib 注入（关于菜单 + 首次启动引导），**行为 100% 保留原版**。
+> ⚠️ **关于本仓库源码**：原项目 `main.swift` 在打包发布时遗失，本仓库的 `main.swift` 为**按可观察行为重建版**（配置结构、`--silent` 静默隐藏循环、GUI、AppleScript 兜底、LaunchAgent 自启等均依据原版表现重建，可能与原版存在细节差异）。V22 在原版 V20 二进制基础上做 dylib 注入（关于菜单 + 首次启动引导 + 旧配置自动迁移），**行为 100% 保留原版**。
 
 配置（可选 / Advanced）：
 
@@ -52,17 +52,17 @@
 bash build_v21_from_v20.sh
 ```
 
-构建脚本会：从原版 V20 DMG 抽取 `.app` → 改 `Info.plist`（版本 20→21 + 注入版权）→ 写入 `about_inject.dylib` 与 `strings.txt` → 用壳脚本包裹 `DYLD_INSERT_LIBRARIES` → ad-hoc 重签 → 产出两份 DMG：
+构建脚本会：从原版 V20 DMG 抽取 `.app` → 改 `Info.plist`（版本 20→22 + 注入版权）→ 写入 `about_inject.dylib` 与 `strings.txt` → 用壳脚本包裹 `DYLD_INSERT_LIBRARIES` → ad-hoc 重签 → 产出两份 DMG：
 
-- `静默启动管理器_v21_universal.dmg`（universal arm64 + x86_64，macOS 12+）
-- `静默启动管理器_v21_x86_64.dmg`（x86_64，macOS 10.15+，需 Rosetta 2）
+- `12-静默启动管理器-v22-universal.dmg`（universal arm64 + x86_64，macOS 12+）
+- `10.15-静默启动管理器-v22-x86_64.dmg`（x86_64，macOS 10.15+，需 Rosetta 2）
 
 > **自动继承旧配置**：首次启动时会自动把旧版（`开机静默启动器`）里的 `settings.json` / `config.json` 继承到新文件夹（`静默启动管理器`），并移除旧文件夹，避免改名后读空配置导致「全天静默 / 不按时间段」的问题。老用户升级无需手动迁移。
 
 ### macOS 版本选择
 
-- **Apple Silicon（M1 及更新）/ macOS 12+**：下载 `静默启动管理器_v21_universal.dmg`（原生 arm64 + x86_64）。
-- **Intel Mac / macOS 10.15+**：下载 `静默启动管理器_v21_x86_64.dmg`（x86_64，在 Apple Silicon 上需 Rosetta 2）。
+- **Apple Silicon（M1 及更新）/ macOS 12+**：下载 `12-静默启动管理器-v22-universal.dmg`（原生 arm64 + x86_64）。
+- **Intel Mac / macOS 10.15+**：下载 `10.15-静默启动管理器-v22-x86_64.dmg`（x86_64，在 Apple Silicon 上需 Rosetta 2）。
 
 两份包均**未签名、未公证**（ad-hoc 签名仅用于满足 DYLD 注入），首次打开可能触发 Gatekeeper，需在「系统设置 ▸ 隐私与安全性」中允许。应用内功能在 macOS 11–15 上可用。
 
@@ -126,14 +126,14 @@ To build:
 bash build_v21_from_v20.sh
 ```
 
-The script extracts the `.app` from the original V20 DMG, bumps `Info.plist` (version 20→21 + copyright), copies `about_inject.dylib` and `strings.txt`, wraps the binary with a `DYLD_INSERT_LIBRARIES` shell shim, ad-hoc re-signs, and produces two DMGs (see above).
+The script extracts the `.app` from the original V20 DMG, bumps `Info.plist` (version 20→22 + copyright), copies `about_inject.dylib` and `strings.txt`, wraps the binary with a `DYLD_INSERT_LIBRARIES` shell shim, ad-hoc re-signs, and produces two DMGs (see above).
 
 > **Auto-migrate legacy config:** on first launch it automatically inherits `settings.json` / `config.json` from the old folder (`开机静默启动器`) into the new one (`静默启动管理器`) and removes the old folder, so upgrading never falls back to empty/default config.
 
 ### Choose a macOS build
 
-- **Apple Silicon (M1 or newer) / macOS 12+:** use `静默启动管理器_v21_universal.dmg` (native arm64 + x86_64).
-- **Intel Mac / macOS 10.15+:** use `静默启动管理器_v21_x86_64.dmg` (x86_64; needs Rosetta 2 on Apple Silicon).
+- **Apple Silicon (M1 or newer) / macOS 12+:** use `12-静默启动管理器-v22-universal.dmg` (native arm64 + x86_64).
+- **Intel Mac / macOS 10.15+:** use `10.15-静默启动管理器-v22-x86_64.dmg` (x86_64; needs Rosetta 2 on Apple Silicon).
 
 Both builds are **unsigned and unnotarized** (ad-hoc signing only, to keep DYLD injection working) and may trigger Gatekeeper on first open; allow the app in System Settings ▸ Privacy & Security. In-app features work on macOS 11–15.
 

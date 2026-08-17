@@ -1,5 +1,5 @@
 #!/bin/bash
-# V21 Build: original V20 binary + about menu dylib injection
+# V22 Build: renamed V21 (config migration dylib) with corrected naming convention
 set -e
 
 # 二进制等长替换：原版二进制里硬编码的旧名「开机静默启动器」(21字节 UTF-8)
@@ -35,7 +35,7 @@ STRINGS="$SCRIPT_DIR/strings.txt"
 
 COPYRIGHT='Copyright © 2026 banqiu. Released under the MIT License.'
 
-echo "=== V21 Build ==="
+echo "=== V22 Build ==="
 
 # ---- 12 universal ----
 echo "--- [1/2] 12 universal ---"
@@ -53,8 +53,8 @@ MACOS_12="$APP_12/Contents/MacOS"
 RES_12="$APP_12/Contents/Resources"
 PLIST_12="$APP_12/Contents/Info.plist"
 
-plutil -replace CFBundleVersion -string "21" "$PLIST_12"
-plutil -replace CFBundleShortVersionString -string "21" "$PLIST_12"
+plutil -replace CFBundleVersion -string "22" "$PLIST_12"
+plutil -replace CFBundleShortVersionString -string "22" "$PLIST_12"
 plutil -insert NSHumanReadableCopyright -string "$COPYRIGHT" "$PLIST_12"
 # 统一显示名：软件「里面」（菜单栏 / Dock / 关于 / 窗口标题）均显示新名
 plutil -replace CFBundleName -string "静默启动管理器" "$PLIST_12"
@@ -76,11 +76,11 @@ xattr -cr "$APP_12"
 codesign --force --sign - "$RES_12/about_inject.dylib" 2>/dev/null
 codesign --force --deep --sign - "$APP_12"
 
-rm -f "$OUTDIR/静默启动管理器_v21_universal.dmg"
+rm -f "$OUTDIR/12-静默启动管理器-v22-universal.dmg"
 ln -s /Applications "$STAGE_12/Applications"
-hdiutil create -volname "静默启动管理器 V21" -srcfolder "$STAGE_12" -ov -format UDZO "$OUTDIR/静默启动管理器_v21_universal.dmg" 2>&1 | tail -1
+hdiutil create -volname "静默启动管理器 V22" -srcfolder "$STAGE_12" -ov -format UDZO "$OUTDIR/12-静默启动管理器-v22-universal.dmg" 2>&1 | tail -1
 hdiutil detach "$MNT_12" -quiet
-echo "OK 12-silent-launcher-universal.dmg"
+echo "OK 12-静默启动管理器-v22-universal.dmg"
 
 # ---- 10.15 x86_64 ----
 echo "--- [2/2] 10.15 x86_64 ---"
@@ -97,8 +97,8 @@ MACOS_15="$APP_15/Contents/MacOS"
 RES_15="$APP_15/Contents/Resources"
 PLIST_15="$APP_15/Contents/Info.plist"
 
-plutil -replace CFBundleVersion -string "21" "$PLIST_15"
-plutil -replace CFBundleShortVersionString -string "21" "$PLIST_15"
+plutil -replace CFBundleVersion -string "22" "$PLIST_15"
+plutil -replace CFBundleShortVersionString -string "22" "$PLIST_15"
 plutil -insert NSHumanReadableCopyright -string "$COPYRIGHT" "$PLIST_15"
 # 统一显示名：软件「里面」（菜单栏 / Dock / 关于 / 窗口标题）均显示新名
 plutil -replace CFBundleName -string "静默启动管理器" "$PLIST_15"
@@ -120,12 +120,12 @@ xattr -cr "$APP_15"
 codesign --force --sign - "$RES_15/about_inject.dylib" 2>/dev/null
 codesign --force --deep --sign - "$APP_15"
 
-rm -f "$OUTDIR/静默启动管理器_v21_x86_64.dmg"
+rm -f "$OUTDIR/10.15-静默启动管理器-v22-x86_64.dmg"
 ln -s /Applications "$STAGE_15/Applications"
-hdiutil create -volname "静默启动管理器 V21" -srcfolder "$STAGE_15" -ov -format UDZO "$OUTDIR/静默启动管理器_v21_x86_64.dmg" 2>&1 | tail -1
+hdiutil create -volname "静默启动管理器 V22" -srcfolder "$STAGE_15" -ov -format UDZO "$OUTDIR/10.15-静默启动管理器-v22-x86_64.dmg" 2>&1 | tail -1
 hdiutil detach "$MNT_15" -quiet
-echo "OK 10.15-silent-launcher-x86_64.dmg"
+echo "OK 10.15-静默启动管理器-v22-x86_64.dmg"
 
 echo ""
 echo "=== DONE ==="
-ls -lh "$OUTDIR/"*silent-launcher*.dmg
+ls -lh "$OUTDIR/"*静默启动管理器*.dmg
