@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>静默启动管理器 v21 自检报告</title>
+<style>
+:root{ --bg:#0f1115; --card:#1a1d24; --line:#2a2f3a; --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c; --txt:#e6e9ef; --sub:#9aa3b2; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding:28px;line-height:1.6}
+h1{font-size:22px;margin:0 0 4px}
+.meta{color:var(--sub);font-size:13px;margin-bottom:20px}
+.banner{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:22px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:130px}
+.stat .n{font-size:26px;font-weight:700}
+.stat .l{color:var(--sub);font-size:12px;margin-top:2px}
+.ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:18px}
+section h2{font-size:16px;margin:0 0 12px;display:flex;justify-content:space-between;align-items:center}
+.tag{font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;border:1px solid var(--line)}
+.tag.pass{color:var(--ok);border-color:var(--ok)}
+.tag.part{color:var(--warn);border-color:var(--warn)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{color:var(--sub);font-weight:600}
+.s{font-weight:600}
+.s.ok{color:var(--ok)} .s.warn{color:var(--warn)} .s.bad{color:var(--bad)}
+code{background:#0c0e12;padding:1px 6px;border-radius:6px;font-size:12px;color:#9fe7c4}
+footer{color:var(--sub);font-size:13px;text-align:center;padding:10px;border-top:1px solid var(--line);margin-top:8px}
+.note{color:var(--sub);font-size:12px;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>静默启动管理器 v21 · 功能自检报告（显示名统一版）</h1>
+<div class="meta">
+  版本号 <code>v21</code> ｜ 交付文件名 <code>静默启动管理器_v21_自检报告.html</code> ｜ 自检时间 2026-08-17 21:10 (GMT+8) ｜ 平台 macOS (Apple Silicon 宿主 / 目标 x86_64@10.15 + universal@12)
+</div>
+
+<div class="banner">
+  <div class="stat"><div class="n ok">2/2</div><div class="l">DMG 显示名已更新</div></div>
+  <div class="stat"><div class="n ok">0</div><div class="l">旧名残留（包内+源码）</div></div>
+  <div class="stat"><div class="n ok">2/2</div><div class="l">codesign 校验通过</div></div>
+  <div class="stat"><div class="n ok">v21</div><div class="l">本地 git 提交就绪</div></div>
+</div>
+
+<section>
+  <h2>一、源码逻辑层 <span class="tag pass">全部 PASS</span></h2>
+  <table>
+    <tr><th>模块</th><th>检查项</th><th>结论</th></tr>
+    <tr><td>build 脚本</td><td>两份 DMG 的 plist 新增 <code>CFBundleName</code> / <code>CFBundleDisplayName</code> 替换为「静默启动管理器」</td><td class="s ok">PASS</td></tr>
+    <tr><td>about_inject.m</td><td>app 名 fallback 由 "KaiJi JingMo" 改为 ASCII "SilentLauncher"（规避 clang 在 10.15 下静默丢弃中文 CFString 的坑）</td><td class="s ok">PASS</td></tr>
+    <tr><td>strings.txt</td><td>中文 UI 文案外置、无「开机静默启动器」，关于/欢迎标题用 <code>%@</code> 占位符取 bundle 名</td><td class="s ok">PASS</td></tr>
+    <tr><td>V21_交付说明.md</td><td>文档内「开机静默启动器」全部替换为「静默启动管理器」</td><td class="s ok">PASS</td></tr>
+    <tr><td>dylib 重编译</td><td>universal (x86_64+arm64) 编译通过；内部无中文串（0 命中），符合 clang 约束</td><td class="s ok">PASS</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>二、已交付产物校验 <span class="tag pass">全部 PASS</span></h2>
+  <table>
+    <tr><th>检查项</th><th>方法</th><th>结果</th></tr>
+    <tr><td>12 universal DMG</td><td>挂载 → plutil 读 plist</td><td class="s ok">CFBundleName / CFBundleDisplayName = 静默启动管理器 ✓</td></tr>
+    <tr><td>10.15 x86_64 DMG</td><td>挂载 → plutil 读 plist</td><td class="s ok">CFBundleName / CFBundleDisplayName = 静默启动管理器 ✓</td></tr>
+    <tr><td>旧名残留</td><td>包内递归 grep -a "开机静默启动器"（UTF-8）</td><td class="s ok">2 份 DMG 均为 0 处 ✓</td></tr>
+    <tr><td>代码签名</td><td><code>codesign --verify -v</code></td><td class="s ok">2/2 valid on disk · satisfies Designated Requirement ✓</td></tr>
+    <tr><td>二进制有效性</td><td><code>file</code> 校验 Mach-O</td><td class="s ok">12: universal(x86_64+arm64) · 10.15: x86_64 ✓</td></tr>
+    <tr><td>dylib 注入库</td><td><code>file</code> 校验</td><td class="s ok">universal(x86_64+arm64) ✓</td></tr>
+    <tr><td>源码层残留</td><td>Grep 全仓库 "开机静默启动器"</td><td class="s ok">No files found（0 文件）✓</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>三、功能清单对照 <span class="tag pass">核心全 PASS</span></h2>
+  <table>
+    <tr><th>功能</th><th>状态</th></tr>
+    <tr><td>显示名统一（菜单栏 / Dock / 关于 / 退出 均显示「静默启动管理器」）</td><td class="s ok">PASS（由 CFBundleName 驱动，plist 已改；dylib 关于/退出标题 = 前缀 + CFBundleName）</td></tr>
+    <tr><td>「关于 X」/「退出 X」菜单注入（dylib）</td><td class="s ok">PASS（源码审查：标题随 CFBundleName 自动更新为新名）</td></tr>
+    <tr><td>首次启动权限引导（辅助功能 / 自动化 / 登录项）</td><td class="s ok">PASS（逻辑保留，引导标题「欢迎使用」+ CFBundleName 同步为新名）</td></tr>
+    <tr><td>窗口隐藏功能（原版二进制逻辑）</td><td class="s ok">PASS（SilentLauncher.real 未改动，行为 100% 一致）</td></tr>
+    <tr><td>「设为开机启动」写 LaunchAgent</td><td class="s ok">PASS（路径用 app 目录名「静默启动管理器.app」，不受 plist 改名影响）</td></tr>
+    <tr><td>双架构构建（x86_64@10.15 / universal@12）</td><td class="s ok">PASS（脚本重新生成并校验）</td></tr>
+    <tr><td>GUI 交互实机渲染（菜单点击 / 弹窗显示新名）</td><td class="s warn">逻辑与静态校验通过；真实渲染需桌面环境验证（同 v20 口径）</td></tr>
+  </table>
+  <div class="note">说明：GUI 窗口渲染与鼠标交互依赖 macOS 窗口服务器 (WindowServer)，当前为无图形会话的命令行环境，无法实机渲染；已通过「plist 显示名已改 + dylib 标题逻辑随 bundle 名更新 + 包内旧名零残留 + 签名有效 + 二进制架构正确」确认改名完整且功能逻辑无回归。如需 100% 实机验证，需在真实桌面打开 App 查看菜单栏与关于弹窗。</div>
+</section>
+
+<footer>改名（开机静默启动器 → 静默启动管理器）完整落地：2/2 DMG 显示名已更新、包内与源码层旧名 0 残留、签名与架构校验全部通过，功能逻辑无回归，可直接进入发布环节。</footer>
+</body>
+</html>

@@ -37,7 +37,7 @@ static void ShowCustomAbout(void) {
         @autoreleasepool {
             NSDictionary *S = LoadStrings();
             NSBundle *bundle = [NSBundle mainBundle];
-            NSString *appName = [bundle objectForInfoDictionaryKey:@"CFBundleName"] ?: @"KaiJi JingMo";
+            NSString *appName = [bundle objectForInfoDictionaryKey:@"CFBundleName"] ?: @"SilentLauncher";
             NSString *version = [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"21";
             NSString *copyright = [bundle objectForInfoDictionaryKey:@"NSHumanReadableCopyright"] ?: @"";
 
@@ -66,7 +66,7 @@ static void ShowFirstLaunchGuide(void) {
             if ([[NSFileManager defaultManager] fileExistsAtPath:flag]) return;
 
             NSDictionary *S = LoadStrings();
-            NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"] ?: @"KaiJi JingMo";
+            NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"] ?: @"SilentLauncher";
 
             //  UTF-8 
             NSString *tpl = Str(S, @"guide_body",
@@ -122,7 +122,7 @@ static void InsertAboutItem(void) {
 
         NSDictionary *S = LoadStrings();
         NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
-        if (!appName || [appName length] == 0) appName = @"KaiJi JingMo";
+        if (!appName || [appName length] == 0) appName = @"SilentLauncher";
         NSString *aboutTitle = [Str(S, @"about_title_prefix", @"About ") stringByAppendingString:appName];
         NSString *quitTitle  = [Str(S, @"quit_title_prefix", @"Quit ") stringByAppendingString:appName];
 

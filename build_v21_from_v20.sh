@@ -32,6 +32,9 @@ PLIST_12="$APP_12/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "21" "$PLIST_12"
 plutil -replace CFBundleShortVersionString -string "21" "$PLIST_12"
 plutil -insert NSHumanReadableCopyright -string "$COPYRIGHT" "$PLIST_12"
+# 统一显示名：软件「里面」（菜单栏 / Dock / 关于 / 窗口标题）均显示新名
+plutil -replace CFBundleName -string "静默启动管理器" "$PLIST_12"
+plutil -replace CFBundleDisplayName -string "静默启动管理器" "$PLIST_12"
 
 mv "$MACOS_12/SilentLauncher" "$MACOS_12/SilentLauncher.real"
 cp "$DYLIB" "$RES_12/about_inject.dylib"
@@ -72,6 +75,9 @@ PLIST_15="$APP_15/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "21" "$PLIST_15"
 plutil -replace CFBundleShortVersionString -string "21" "$PLIST_15"
 plutil -insert NSHumanReadableCopyright -string "$COPYRIGHT" "$PLIST_15"
+# 统一显示名：软件「里面」（菜单栏 / Dock / 关于 / 窗口标题）均显示新名
+plutil -replace CFBundleName -string "静默启动管理器" "$PLIST_15"
+plutil -replace CFBundleDisplayName -string "静默启动管理器" "$PLIST_15"
 
 mv "$MACOS_15/SilentLauncher" "$MACOS_15/SilentLauncher.real"
 cp "$DYLIB" "$RES_15/about_inject.dylib"
