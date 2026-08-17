@@ -2,6 +2,30 @@
 # V21 Build: original V20 binary + about menu dylib injection
 set -e
 
+# 二进制等长替换：原版二进制里硬编码的旧名「开机静默启动器」(21字节 UTF-8)
+# 全部替换为「静默启动管理器」(同样 21 字节)。UI 标题 / 路径字符串一并修正，
+# 路径替换后反而与实际 .app 目录名一致（修好原版用旧路径找自己的潜在 bug）。
+patch_binary() {
+  local BIN="$1"
+  python3 - "$BIN" <<'PY'
+import sys
+p = sys.argv[1]
+old = "开机静默启动器".encode("utf-8")
+new = "静默启动管理器".encode("utf-8")
+assert len(old) == len(new), "old/new must be equal byte length"
+with open(p, "rb") as f:
+    data = f.read()
+n = data.count(old)
+if n:
+    data = data.replace(old, new)
+    with open(p, "wb") as f:
+        f.write(data)
+    print(f"patched {n} occurrences in {p}")
+else:
+    print(f"(no old name in {p}, skip)")
+PY
+}
+
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 OUTDIR="/Users/banqiu/Downloads/workbuddy 项目/开机静默"
 SRC_12="/Users/banqiu/Downloads/workbuddy 项目/开机静默/12-静默启动管理器-V20.dmg"
@@ -37,6 +61,7 @@ plutil -replace CFBundleName -string "静默启动管理器" "$PLIST_12"
 plutil -replace CFBundleDisplayName -string "静默启动管理器" "$PLIST_12"
 
 mv "$MACOS_12/SilentLauncher" "$MACOS_12/SilentLauncher.real"
+patch_binary "$MACOS_12/SilentLauncher.real"
 cp "$DYLIB" "$RES_12/about_inject.dylib"
 cp "$STRINGS" "$RES_12/strings.txt"
 cat > "$MACOS_12/SilentLauncher" <<'EOF'
@@ -80,6 +105,7 @@ plutil -replace CFBundleName -string "静默启动管理器" "$PLIST_15"
 plutil -replace CFBundleDisplayName -string "静默启动管理器" "$PLIST_15"
 
 mv "$MACOS_15/SilentLauncher" "$MACOS_15/SilentLauncher.real"
+patch_binary "$MACOS_15/SilentLauncher.real"
 cp "$DYLIB" "$RES_15/about_inject.dylib"
 cp "$STRINGS" "$RES_15/strings.txt"
 cat > "$MACOS_15/SilentLauncher" <<'EOF'

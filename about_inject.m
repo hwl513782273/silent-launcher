@@ -152,13 +152,92 @@ static void InsertAboutItem(void) {
     }
 }
 
+/// Global: new display name (set as early as possible)
+static NSString *g_newName = nil;
+
+/// Fix window title bar (old name hardcoded in original binary setTitle:)
+static void FixWindowTitles(void) {
+    @try {
+        NSString *name = g_newName;
+        if (!name) name = @"SilentLauncher";
+        for (NSWindow *w in [NSApplication sharedApplication].windows) {
+            if ([w.title containsString:@"\xe5\xbc\x80\xe6\x9c\xba"] ||
+                [w.title containsString:@"\xe9\x9d\x99\xe9\xbb\x98"]) {
+                w.title = name;
+            }
+        }
+    } @catch (NSException *e) {}
+}
+
+/// Recursively replace old name in ALL text-holding views (backup for text set before swizzle)
+static void FixAllTextInView(NSView *view, NSString *newName) {
+    if (!view || ![view isKindOfClass:[NSView class]]) return;
+    @try {
+        // NSTextField / NSLabel stringValue
+        if ([view respondsToSelector:@selector(stringValue)]) {
+            NSString *txt = [(id)view stringValue];
+            if (txt && ([txt containsString:@"\xe5\xbc\x80\xe6\x9c\xba"] ||
+                       [txt containsString:@"\xe9\x9d\x99\xe9\xbb\x98"])) {
+                [(id)view setStringValue:newName];
+            }
+        }
+    } @catch (NSException *e) {}
+    // Recurse subviews
+    for (NSView *sub in [view subviews]) {
+        FixAllTextInView(sub, newName);
+    }
+}
+
+/// Intercept setStringValue: on NSTextField — replaces old name at call time
+static void InstallSwizzles(void) {
+    // --- Hook NSTextField.setStringValue: ---
+    Method m1 = class_getInstanceMethod([NSTextField class], @selector(setStringValue:));
+    if (m1) {
+        IMP origImp = method_getImplementation(m1);
+        IMP newImp = imp_implementationWithBlock(^(id self, NSString *value) {
+            if (value && g_newName &&
+                ([value containsString:@"\xe5\xbc\x80\xe6\x9c\xba"] ||
+                 [value containsString:@"\xe9\x9d\x99\xe9\xbb\x98"])) {
+                value = g_newName;
+            }
+            ((void(*)(id, SEL, NSString *))origImp)(self, @selector(setStringValue:), value);
+        });
+        method_setImplementation(m1, newImp);
+    }
+
+    // --- Hook NSTextField.setAttributedStringValue: ---
+    Method m2 = class_getInstanceMethod([NSTextField class], @selector(setAttributedStringValue:));
+    if (m2) {
+        IMP origImp2 = method_getImplementation(m2);
+        IMP newImp2 = imp_implementationWithBlock(^(id self, NSAttributedString *value) {
+            if (value && g_newName) {
+                NSString *str = [value string];
+                if (str && ([str containsString:@"\xe5\xbc\x80\xe6\x9c\xba"] ||
+                          [str containsString:@"\xe9\x9d\x99\xe9\xbb\x98"])) {
+                    value = [[NSAttributedString alloc] initWithString:g_newName];
+                }
+            }
+            ((void(*)(id, SEL, NSAttributedString *))origImp2)(self, @selector(setAttributedStringValue:), value);
+        });
+        method_setImplementation(m2, newImp2);
+    }
+}
+
 __attribute__((constructor))
 static void on_load(void) {
-    //  showCustomAbout  NSApplication
+    // Cache new name ASAP (before any UI code runs)
+    g_newName = [NSBundle mainBundle].infoDictionary[@"CFBundleName"];
+    if (!g_newName || g_newName.length == 0) g_newName = @"SilentLauncher";
+    [g_newName retain];
+
+    // Install swizzles BEFORE nib loading (intercepts setStringValue: / setAttributedStringValue:)
+    InstallSwizzles();
+
+    // showCustomAbout  NSApplication
     IMP imp = imp_implementationWithBlock(^{ ShowCustomAbout(); });
     class_addMethod([NSApplication class], @selector(showCustomAbout), imp, "v@:");
 
-    // App  + 
+    // App  +
     [[NSNotificationCenter defaultCenter]
         addObserverForName:NSApplicationDidFinishLaunchingNotification
                     object:nil queue:nil
@@ -166,6 +245,17 @@ static void on_load(void) {
                     dispatch_async(dispatch_get_main_queue(), ^{
                         ShowFirstLaunchGuide();
                         InsertAboutItem();
+
+                        // Backup: fix window titles (catches setTitle: before our swizzle)
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                            dispatch_get_main_queue(), ^{
+                                FixWindowTitles();
+                                // Deep scan: fix any text fields already set with old name
+                                NSString *name = g_newName ?: @"SilentLauncher";
+                                for (NSWindow *w in [NSApplication sharedApplication].windows) {
+                                    FixAllTextInView(w.contentView, name);
+                                }
+                            });
                     });
                 }];
 }
