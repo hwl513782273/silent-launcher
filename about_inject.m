@@ -31,25 +31,28 @@ static NSString *Str(NSDictionary *d, NSString *key, NSString *fallback) {
     return (v && v.length) ? v : fallback;
 }
 
-///    AppleScript display dialog App 
+///    AppleScript display dialog — 唯一关于对话框（覆盖原版）
 static void ShowCustomAbout(void) {
     @try {
         @autoreleasepool {
-            NSDictionary *S = LoadStrings();
             NSBundle *bundle = [NSBundle mainBundle];
             NSString *appName = [bundle objectForInfoDictionaryKey:@"CFBundleName"] ?: @"SilentLauncher";
             NSString *version = [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"21";
-            NSString *copyright = [bundle objectForInfoDictionaryKey:@"NSHumanReadableCopyright"] ?: @"";
 
-            NSString *tpl = Str(S, @"about_body", @"%@ v%@\n\n%@\nMIT License");
-            NSString *body = [NSString stringWithFormat:tpl, appName, version, copyright];
+            // 手工构建干净的关于内容（不依赖模板中的 %@ 防止展开异常）
+            NSString *body = [NSString stringWithFormat:
+                @"%@\n版本：%@\n\n"
+                @"登录时自动隐藏指定应用窗口。\n"
+                @"拖入即用，无需配置。\n\n"
+                @"Copyright © 2026 banqiu.\n"
+                @"Released under the MIT License.",
+                appName, version];
             body = [body stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
 
-            NSString *okBtn = Str(S, @"ok_button", @"OK");
-            NSString *title = [Str(S, @"about_title_prefix", @"About ") stringByAppendingString:appName];
             NSString *src = [NSString stringWithFormat:
-                @"display dialog \"%@\" buttons {\"%@\"} with title \"%@\" default button 1",
-                body, okBtn, title];
+                @"display dialog \"%@\" buttons {\"确定\"} with title \"关于 %@\" default button 1 "
+                @"with icon note giving up after 120",
+                body, appName];
             [[[NSAppleScript alloc] initWithSource:src] executeAndReturnError:nil];
         }
     } @catch (NSException *e) { /*  */ }
@@ -70,16 +73,17 @@ static void ShowFirstLaunchGuide(void) {
 
             //  UTF-8 
             NSString *tpl = Str(S, @"guide_body",
-                @"This app needs Accessibility and Automation permissions. "
-                @"After granting Accessibility, quit and reopen the app.");
+                @"本应用需要以下授权才能正常工作：\n\n"
+                @"1. 辅助功能（必须）：用于自动隐藏指定 App 的窗口。点“确定”后系统会弹出授权窗口，请勾选「%@」并点“好”。\n"
+                @"2. 自动化（必须）：用于向目标 App 发送指令关闭窗口。首次隐藏时系统会逐个弹窗，请全部点“允许”。\n"
+                @"3. 登录项：开机自启无需密码，可在「系统设置 ▸ 通用 ▸ 登录项」中管理。\n\n"
+                @"⚠️ 辅助功能授权后请【退出并重新打开本应用】才会生效。");
             NSString *msg = [NSString stringWithFormat:tpl, appName];
             msg = [msg stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
 
-            NSString *okBtn = Str(S, @"ok_button", @"OK");
-            NSString *title = [Str(S, @"welcome_title_prefix", @"Welcome - ") stringByAppendingString:appName];
             NSString *src = [NSString stringWithFormat:
-                @"display dialog \"%@\" buttons {\"%@\"} with title \"%@\" default button 1",
-                msg, okBtn, title];
+                @"display dialog \"%@\" buttons {\"确定\"} with title \"欢迎使用 %@\" default button 1",
+                msg, appName];
             @try { [[[NSAppleScript alloc] initWithSource:src] executeAndReturnError:nil]; }
             @catch (NSException *e) {}
 
@@ -123,8 +127,8 @@ static void InsertAboutItem(void) {
         NSDictionary *S = LoadStrings();
         NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
         if (!appName || [appName length] == 0) appName = @"SilentLauncher";
-        NSString *aboutTitle = [Str(S, @"about_title_prefix", @"About ") stringByAppendingString:appName];
-        NSString *quitTitle  = [Str(S, @"quit_title_prefix", @"Quit ") stringByAppendingString:appName];
+        NSString *aboutTitle = [@"关于 " stringByAppendingString:appName];
+        NSString *quitTitle  = [@"退出 " stringByAppendingString:appName];
 
         // /
         BOOL hasAbout = NO, hasQuit = NO;
@@ -152,92 +156,67 @@ static void InsertAboutItem(void) {
     }
 }
 
-/// Global: new display name (set as early as possible)
-static NSString *g_newName = nil;
-
-/// Fix window title bar (old name hardcoded in original binary setTitle:)
-static void FixWindowTitles(void) {
+/// 安装新版后迁移旧版配置：把旧名文件夹（开机静默启动器）里用户真实的
+/// settings.json / config.json 继承到新名文件夹（静默启动管理器），
+/// 随后把旧文件夹改名为 .old（保留可恢复，且不再被 App 读取）。
+/// 这样改名后不会出现「读空配置 → 全天静默 / 不按时间段」的问题。
+/// 幂等：迁移完成后旧文件夹已改名，再次启动 oldDir 不存在 → 直接返回。
+static void MigrateOldConfig(void) {
     @try {
-        NSString *name = g_newName;
-        if (!name) name = @"SilentLauncher";
-        for (NSWindow *w in [NSApplication sharedApplication].windows) {
-            if ([w.title containsString:@"\xe5\xbc\x80\xe6\x9c\xba"] ||
-                [w.title containsString:@"\xe9\x9d\x99\xe9\xbb\x98"]) {
-                w.title = name;
-            }
-        }
-    } @catch (NSException *e) {}
-}
+        @autoreleasepool {
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSString *support = [NSSearchPathForDirectoriesInDomains(
+                NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+            if (!support) return;
 
-/// Recursively replace old name in ALL text-holding views (backup for text set before swizzle)
-static void FixAllTextInView(NSView *view, NSString *newName) {
-    if (!view || ![view isKindOfClass:[NSView class]]) return;
-    @try {
-        // NSTextField / NSLabel stringValue
-        if ([view respondsToSelector:@selector(stringValue)]) {
-            NSString *txt = [(id)view stringValue];
-            if (txt && ([txt containsString:@"\xe5\xbc\x80\xe6\x9c\xba"] ||
-                       [txt containsString:@"\xe9\x9d\x99\xe9\xbb\x98"])) {
-                [(id)view setStringValue:newName];
-            }
-        }
-    } @catch (NSException *e) {}
-    // Recurse subviews
-    for (NSView *sub in [view subviews]) {
-        FixAllTextInView(sub, newName);
-    }
-}
+            NSString *oldDir = [support stringByAppendingPathComponent:@"开机静默启动器"];
+            NSString *newDir = [support stringByAppendingPathComponent:@"静默启动管理器"];
 
-/// Intercept setStringValue: on NSTextField — replaces old name at call time
-static void InstallSwizzles(void) {
-    // --- Hook NSTextField.setStringValue: ---
-    Method m1 = class_getInstanceMethod([NSTextField class], @selector(setStringValue:));
-    if (m1) {
-        IMP origImp = method_getImplementation(m1);
-        IMP newImp = imp_implementationWithBlock(^(id self, NSString *value) {
-            if (value && g_newName &&
-                ([value containsString:@"\xe5\xbc\x80\xe6\x9c\xba"] ||
-                 [value containsString:@"\xe9\x9d\x99\xe9\xbb\x98"])) {
-                value = g_newName;
-            }
-            ((void(*)(id, SEL, NSString *))origImp)(self, @selector(setStringValue:), value);
-        });
-        method_setImplementation(m1, newImp);
-    }
+            // 旧版文件夹不存在 → 无需迁移（全新安装，使用 App 默认配置）
+            if (![fm fileExistsAtPath:oldDir]) return;
 
-    // --- Hook NSTextField.setAttributedStringValue: ---
-    Method m2 = class_getInstanceMethod([NSTextField class], @selector(setAttributedStringValue:));
-    if (m2) {
-        IMP origImp2 = method_getImplementation(m2);
-        IMP newImp2 = imp_implementationWithBlock(^(id self, NSAttributedString *value) {
-            if (value && g_newName) {
-                NSString *str = [value string];
-                if (str && ([str containsString:@"\xe5\xbc\x80\xe6\x9c\xba"] ||
-                          [str containsString:@"\xe9\x9d\x99\xe9\xbb\x98"])) {
-                    value = [[NSAttributedString alloc] initWithString:g_newName];
+            // 确保新文件夹存在
+            BOOL isDir = NO;
+            if (![fm fileExistsAtPath:newDir isDirectory:&isDir] || !isDir) {
+                [fm createDirectoryAtPath:newDir withIntermediateDirectories:YES attributes:nil error:nil];
+            }
+
+            // 继承关键配置（覆盖新文件夹里可能错误的默认配置）
+            for (NSString *f in @[@"settings.json", @"config.json"]) {
+                NSString *src = [oldDir stringByAppendingPathComponent:f];
+                NSString *dst = [newDir stringByAppendingPathComponent:f];
+                if ([fm fileExistsAtPath:src]) {
+                    [fm removeItemAtPath:dst error:nil];
+                    [fm copyItemAtPath:src toPath:dst error:nil];
                 }
             }
-            ((void(*)(id, SEL, NSAttributedString *))origImp2)(self, @selector(setAttributedStringValue:), value);
-        });
-        method_setImplementation(m2, newImp2);
-    }
+
+            // 标记迁移完成（便于自检 / 防重入）
+            NSString *marker = [newDir stringByAppendingPathComponent:@".migrated_v21"];
+            [@"done" writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+            // 清除旧文件夹（改名保留，可恢复；App 只识别新名，故不再被读取）
+            NSString *oldArchived = [oldDir stringByAppendingString:@".old"];
+            int i = 1;
+            while ([fm fileExistsAtPath:oldArchived]) {
+                oldArchived = [NSString stringWithFormat:@"%@.old.%d", oldDir, i];
+                i++;
+            }
+            [fm moveItemAtPath:oldDir toPath:oldArchived error:nil];
+        }
+    } @catch (NSException *e) { /* 迁移失败不影响主功能 */ }
 }
 
 __attribute__((constructor))
 static void on_load(void) {
-    // Cache new name ASAP (before any UI code runs)
-    g_newName = [NSBundle mainBundle].infoDictionary[@"CFBundleName"];
-    if (!g_newName || g_newName.length == 0) g_newName = @"SilentLauncher";
-    [g_newName retain];
-
-    // Install swizzles BEFORE nib loading (intercepts setStringValue: / setAttributedStringValue:)
-    InstallSwizzles();
+    // 0) 安装新版后先迁移旧版配置（必须在 App 读取配置之前完成）
+    MigrateOldConfig();
 
     // showCustomAbout  NSApplication
     IMP imp = imp_implementationWithBlock(^{ ShowCustomAbout(); });
     class_addMethod([NSApplication class], @selector(showCustomAbout), imp, "v@:");
 
-    // App  +
+    // App  + 
     [[NSNotificationCenter defaultCenter]
         addObserverForName:NSApplicationDidFinishLaunchingNotification
                     object:nil queue:nil
@@ -245,17 +224,6 @@ static void on_load(void) {
                     dispatch_async(dispatch_get_main_queue(), ^{
                         ShowFirstLaunchGuide();
                         InsertAboutItem();
-
-                        // Backup: fix window titles (catches setTitle: before our swizzle)
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
-                            dispatch_get_main_queue(), ^{
-                                FixWindowTitles();
-                                // Deep scan: fix any text fields already set with old name
-                                NSString *name = g_newName ?: @"SilentLauncher";
-                                for (NSWindow *w in [NSApplication sharedApplication].windows) {
-                                    FixAllTextInView(w.contentView, name);
-                                }
-                            });
                     });
                 }];
 }

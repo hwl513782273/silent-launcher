@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>静默启动管理器 v21 配置迁移自检报告</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --txt:#e6e9ef; --mut:#9aa3b2; --ok:#3ddc84; --warn:#ffcc4d; --bad:#ff5c5c;
+    --acc:#5b9dff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.6;}
+  .wrap{max-width:960px;margin:0 auto;padding:32px 24px 64px;}
+  h1{font-size:26px;margin:0 0 4px;}
+  .meta{color:var(--mut);font-size:13px;margin-bottom:24px;}
+  .meta code{background:var(--panel2);padding:2px 6px;border-radius:5px;color:var(--acc);}
+  .banner{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0 28px;}
+  .stat{flex:1;min-width:140px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
+  .stat .n{font-size:28px;font-weight:700;line-height:1.1;}
+  .stat .l{color:var(--mut);font-size:13px;margin-top:4px;}
+  .ok{color:var(--ok);} .warn{color:var(--warn);} .bad{color:var(--bad);}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:18px;}
+  section h2{font-size:17px;margin:0 0 12px;display:flex;align-items:center;gap:10px;}
+  .tag{font-size:11px;padding:2px 9px;border-radius:999px;font-weight:600;}
+  .tag.ok{background:rgba(61,220,132,.15);color:var(--ok);}
+  .tag.warn{background:rgba(255,204,77,.15);color:var(--warn);}
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;}
+  td.s{font-weight:600;text-align:center;white-space:nowrap;}
+  td.s.ok{color:var(--ok);} td.s.warn{color:var(--warn);} td.s.bad{color:var(--bad);}
+  code{background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:13px;color:var(--acc);}
+  .note{color:var(--mut);font-size:13px;margin-top:10px;}
+  ul{margin:8px 0 0;padding-left:20px;} li{margin:4px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>静默启动管理器 · 配置自动迁移自检报告</h1>
+  <div class="meta">
+    版本：<code>v21（配置迁移修复版）</code> · 交付文件名：<code>静默启动管理器_v21_universal.dmg</code> / <code>静默启动管理器_v21_x86_64.dmg</code><br>
+    自检时间：2026-08-17 23:16 GMT+8 · 平台：macOS 26 (Apple Silicon) · 构建：universal + x86_64
+  </div>
+
+  <div class="banner">
+    <div class="stat"><div class="n ok">2/2</div><div class="l">DMG 产物校验</div></div>
+    <div class="stat"><div class="n ok">4/4</div><div class="l">迁移算法场景测试</div></div>
+    <div class="stat"><div class="n ok">PASS</div><div class="l">内嵌 dylib 签名</div></div>
+    <div class="stat"><div class="n ok">x86_64+arm64</div><div class="l">dylib 通用架构</div></div>
+  </div>
+
+  <section>
+    <h2>① 源码逻辑层 <span class="tag ok">PASS</span></h2>
+    <table>
+      <tr><th>模块</th><th>检查项</th><th>结论</th></tr>
+      <tr><td><code>about_inject.m</code></td><td>新增 <code>MigrateOldConfig()</code>：读取旧文件夹 <code>开机静默启动器</code> 的 <code>settings.json</code>/<code>config.json</code> 继承到 <code>静默启动管理器</code></td><td class="s ok">PASS</td></tr>
+      <tr><td><code>about_inject.m</code></td><td>迁移后置 <code>.migrated_v21</code> 标记 + 旧文件夹改名 <code>.old</code>（可恢复、不再被读取）</td><td class="s ok">PASS</td></tr>
+      <tr><td><code>about_inject.m</code></td><td>构造函数 <code>on_load</code> 在 App 读取配置前最先调用迁移，幂等（旧文件夹已改名则跳过）</td><td class="s ok">PASS</td></tr>
+      <tr><td><code>build_v21_from_v20.sh</code></td><td>输出文件名改为带版本号（<code>静默启动管理器_v21_*.dmg</code>），不覆盖旧交付物</td><td class="s ok">PASS</td></tr>
+      <tr><td><code>README.md</code></td><td>下载指引与「自动继承旧配置」说明已对齐新文件名（中/英双语）</td><td class="s ok">PASS</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>② 已交付产物校验 <span class="tag ok">PASS</span></h2>
+    <table>
+      <tr><th>检查项</th><th>方法</th><th>结果</th></tr>
+      <tr><td>universal DMG 存在</td><td><code>ls</code> 输出目录</td><td class="s ok">✓ 静默启动管理器_v21_universal.dmg</td></tr>
+      <tr><td>x86_64 DMG 存在</td><td><code>ls</code> 输出目录</td><td class="s ok">✓ 静默启动管理器_v21_x86_64.dmg</td></tr>
+      <tr><td>内嵌 dylib 含迁移逻辑</td><td>二进制搜 <code>.migrated_v21</code> / <code>settings.json</code> / <code>config.json</code></td><td class="s ok">✓ 各 2 次（每架构）</td></tr>
+      <tr><td>中文配置目录名保留</td><td>二进制搜 UTF-16LE <code>开机静默启动器</code> / <code>静默启动管理器</code></td><td class="s ok">✓ 各 2 次</td></tr>
+      <tr><td>App 架构</td><td><code>lipo -info</code></td><td class="s ok">✓ x86_64 + arm64</td></tr>
+      <tr><td>App / dylib 签名</td><td><code>codesign --verify</code></td><td class="s ok">✓ valid</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>③ 迁移算法验证（重定向基目录 · 4 场景）<span class="tag ok">PASS 4/4</span></h2>
+    <table>
+      <tr><th>场景</th><th>初始状态</th><th>预期行为</th><th>实测</th></tr>
+      <tr><td>S1</td><td>旧存在 / 新为空（改名后坏状态）</td><td>新继承正确配置，旧改名 <code>.old</code></td><td class="s ok">✓ new=globalSilent:true,finalTime:10；oldRenamed=1</td></tr>
+      <tr><td>S2</td><td>旧存在 / 新已正确（手动拷过）</td><td>新保持正确，旧改名 <code>.old</code></td><td class="s ok">✓ new 正确；oldRenamed=1</td></tr>
+      <tr><td>S3</td><td>旧不存在（全新安装）</td><td>不迁移、不产生垃圾</td><td class="s ok">✓ newExists=0；oldRenamed=0</td></tr>
+      <tr><td>S4</td><td>幂等（旧已改名后再次启动）</td><td>无操作</td><td class="s ok">✓ oldDir 不再出现=0</td></tr>
+    </table>
+    <div class="note">说明：算法用与 dylib 完全一致的函数体在 <code>/tmp</code> 重定向基目录验证，覆盖升级坏状态、已迁移、全新安装、重复启动四类。</div>
+  </section>
+
+  <section>
+    <h2>④ 结论 <span class="tag ok">可发布</span></h2>
+    <ul>
+      <li>新 DMG 安装后首次启动会自动继承旧版（<code>开机静默启动器</code>）的真实配置到新文件夹，并移除旧文件夹，彻底消除「改名后读空配置 → 全天静默 / 不按时间段」的问题。</li>
+      <li>交付物为新增带版本号文件，未覆盖历史 DMG；GitHub 发布时请挂这两个新 DMG 作为 release 附件。</li>
+      <li>旧文件夹改名 <code>.old</code> 后仍可恢复；如需彻底清理可自行删除 <code>~/Library/Application Support/开机静默启动器.old</code>。</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>

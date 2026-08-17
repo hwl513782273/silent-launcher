@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>静默启动管理器 · 启动项自检报告</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0e1116;color:#d7dde5;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;line-height:1.6}
+.wrap{max-width:980px;margin:0 auto;padding:32px 24px 64px}
+h1{font-size:26px;margin:0 0 6px;color:#fff}
+.meta{color:#7d8794;font-size:13px;margin-bottom:24px}
+.meta code{background:#1b212b;padding:2px 6px;border-radius:4px;color:#9fb4ff}
+.banner{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0 28px}
+.stat{flex:1;min-width:120px;background:#161b22;border:1px solid #232a34;border-radius:10px;padding:14px 16px}
+.stat .n{font-size:30px;font-weight:700;line-height:1}
+.stat .l{font-size:12px;color:#8b95a3;margin-top:6px}
+.ok{color:#3fb950}.warn{color:#d29922}.bad{color:#f85149}
+section{background:#131820;border:1px solid #232a34;border-radius:12px;padding:18px 20px;margin-bottom:20px}
+section h2{font-size:17px;margin:0 0 12px;color:#fff;display:flex;align-items:center;gap:10px}
+.tag{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:20px;font-weight:600}
+.tag.PASS{background:rgba(63,185,80,.15);color:#3fb950}
+.tag.WARN{background:rgba(210,153,34,.15);color:#d29922}
+.tag.FAIL{background:rgba(248,81,73,.15);color:#f85149}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid #212832}
+th{color:#8b95a3;font-weight:600;font-size:12px;text-transform:none}
+td.s{font-weight:700;text-align:center;width:70px}
+.note{background:#1b212b;border-left:3px solid #d29922;padding:10px 14px;border-radius:6px;font-size:13px;color:#cdd5df;margin-top:10px}
+.note.bad{border-color:#f85149}.note.ok{border-color:#3fb950}
+code{background:#1b212b;padding:1px 5px;border-radius:4px;color:#9fb4ff}
+</style></head>
+<body><div class="wrap">
+<h1>静默启动管理器 · 启动项 / 自启自检报告</h1>
+<div class="meta">版本 <code>v21</code> · 检出文件名 <code>静默启动管理器.app</code> · 自检时间 <code>2026-08-17 22:38:11</code> · 平台 macOS (darwin)</div>
+
+<div class="banner">
+  <div class="stat"><div class="n ok">4/4</div><div class="l">结论项 PASS / 总项</div></div>
+  <div class="stat"><div class="n ok">1</div><div class="l">生效登录项(RunAtLoad)</div></div>
+  <div class="stat"><div class="n ok">0</div><div class="l">残留 App 副本</div></div>
+  <div class="stat"><div class="n ok">0</div><div class="l">废纸篓副本被注册</div></div>
+  <div class="stat"><div class="n ok">0</div><div class="l">当前运行进程</div></div>
+</div>
+
+<section>
+  <h2>综合结论 <span class="tag PASS">PASS</span></h2>
+  <table><tr><th style="width:70px">级别</th><th>说明</th></tr><tr><td class='s ok'>PASS</td><td>登录项无重复</td></tr><tr><td class='s ok'>PASS</td><td>无残留副本</td></tr><tr><td class='s ok'>PASS</td><td>二进制改名彻底（旧名 0 处 / 新名已写入）</td></tr><tr><td class='s ok'>PASS</td><td>dylib 包装与关于注入完整</td></tr></table>
+  <div class="note ok">
+    <b>「一起启动 / 什么都打不开」根因：</b>
+    未发现重复登录项，自启逻辑正常。
+  </div>
+</section>
+
+<section>
+  <h2>① 登录项 (LaunchAgents) <span class="tag PASS">PASS</span></h2>
+  <table><tr><th>文件</th><th>Label</th><th>ProgramArguments</th><th>RunAtLoad</th><th>目标存在</th><th>结论</th></tr>
+  <tr><td>com.user.silentlauncher.plist</td><td>com.user.silentlauncher</td>
+<td>/Applications/静默启动管理器.app/Contents/MacOS/SilentLauncher --silent</td><td>是(RunAtLoad)</td><td>✅</td>
+<td class="s ok">PASS</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>② 磁盘 App 副本 <span class="tag PASS">PASS</span></h2>
+  <table><tr><th>路径</th><th>位置</th><th>结论</th></tr><tr><td>/Applications/静默启动管理器.app</td><td>📂 /Applications（本体）</td><td class='s ok'>PASS</td></tr></table>
+  <div class="note">废纸篓中 0 份为反复重建/安装时移入的残留，可清空废纸篓释放空间（不影响 /Applications 本体）。</div>
+</section>
+
+<section>
+  <h2>③ 运行态 <span class="tag PASS">PASS</span></h2>
+  <h3 style="font-size:13px;color:#8b95a3;margin:6px 0">进程</h3>
+  <table><tr><th>PID</th><th>CPU%</th><th>MEM%</th><th>命令</th></tr><tr><td colspan='4'>当前无运行中的启动器进程</td></tr></table>
+  <h3 style="font-size:13px;color:#8b95a3;margin:14px 0 6px">launchctl</h3>
+  <table><tr><th>PID</th><th>上次退出码</th><th>Label</th></tr><tr><td>-</td><td>-15</td><td>com.user.silentlauncher</td></tr></table>
+</section>
+
+<section>
+  <h2>④ App 本体完整性 <span class="tag PASS">PASS</span></h2>
+  <table><tr><th>检查项</th><th>结果</th><th>结论</th></tr>
+<tr><td>App 本体存在</td><td>/Applications/静默启动管理器.app</td><td class='s ok'>PASS</td></tr>
+<tr><td>版本号</td><td>CFBundleShortVersionString = 21</td><td class='s ok'>PASS</td></tr>
+<tr><td>Bundle ID</td><td>com.user.silentlauncher</td><td class='s ok'>PASS</td></tr>
+<tr><td>二进制改名（旧名残留）</td><td>0 处「开机静默启动器」</td><td class='s ok'>PASS</td></tr>
+<tr><td>二进制新名写入</td><td>10 处「静默启动管理器」</td><td class='s ok'>PASS</td></tr>
+<tr><td>dylib 包装(SilentLauncher)</td><td>存在</td><td class='s ok'>PASS</td></tr>
+<tr><td>关于注入(about_inject.dylib)</td><td>存在</td><td class='s ok'>PASS</td></tr>
+</table>
+</section>
+
+<section>
+  <h2>⑤ LaunchServices 注册异常 <span class="tag PASS">PASS</span></h2>
+  <table><tr><th>被注册的路径</th><th>结论</th></tr><tr><td>未发现废纸篓副本被注册</td><td class='s ok'>PASS</td></tr></table>
+  <div class="note">废纸篓副本被 LaunchServices 注册会形成「幽灵」入口；清空废纸篓或用 <code>lsregister -u</code> 注销后即可消除。</div>
+</section>
+
+<section>
+  <h2>⑥ 设计说明（为何会自启）</h2>
+  <p style="font-size:13.5px;color:#cdd5df">静默启动管理器<b>本就设计为登录时自启</b>：登录项 <code>RunAtLoad=true</code>，开机自动运行并以 <code>--silent</code> 隐藏被管理 App 的窗口（这是它的核心功能）。因此「开机自动启动」是预期行为；真正异常的是<b>重复登录项导致被拉起两份</b>。若你希望彻底关闭自启，可删除全部相关登录项（但会使其隐藏窗口功能失效）。</p>
+</section>
+
+</div></body></html>
