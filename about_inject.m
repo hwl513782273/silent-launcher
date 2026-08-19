@@ -118,25 +118,50 @@ static void ShowFirstLaunchGuide(void) {
     });
 }
 
-/// 尝试把「关于/退出」插入现有主菜单；返回 YES 表示成功。
+/// 调试日志：仅当环境变量 SILENTLAUNCHER_DEBUG=1 时输出（正式版零干扰）
+static void DebugLog(NSString *fmt, ...) {
+    if (getenv("SILENTLAUNCHER_DEBUG")) {
+        va_list args; va_start(args, fmt);
+        NSLogv(fmt, args); va_end(args);
+    }
+}
+
+static void ScheduleAboutConfirm(int attempt); // 前向声明（ScheduleAboutCheck 中使用）
+
+/// 尝试把「关于/退出」插入现有主菜单；返回 YES 表示成功（幂等，可重复调用）。
+/// 关键点：SwiftUI 先创建 mainMenu 骨架（submenu 可能为空），再填充内容；
+/// 必须「找到 submenu 就插入」（即使空），否则永远等不到「非空」时机。
+/// 插入后被 SwiftUI 重建覆盖的问题由 ScheduleAboutConfirm 幂等重插兜底。
 static BOOL TryInsertAbout(void) {
     @autoreleasepool {
         NSApplication *app = [NSApplication sharedApplication];
         NSMenu *mainMenu = [app mainMenu];
         if (!mainMenu) return NO;
-        NSMenu *appMenu = nil;
-        NSInteger n = [mainMenu numberOfItems];
-        for (NSInteger j = 0; j < n; j++) {
-            NSMenuItem *it = [mainMenu itemAtIndex:j];
-            if ([it submenu]) { appMenu = [it submenu]; break; }
-        }
-        if (!appMenu) return NO;
 
-        NSDictionary *S = LoadStrings();
         NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
         if (!appName || [appName length] == 0) appName = @"SilentLauncher";
         NSString *aboutTitle = [@"关于 " stringByAppendingString:appName];
         NSString *quitTitle  = [@"退出 " stringByAppendingString:appName];
+
+        NSMenu *appMenu = nil;
+        NSInteger n = [mainMenu numberOfItems];
+        // 1) 优先：submenu 标题 == appName 的应用菜单
+        for (NSInteger j = 0; j < n; j++) {
+            NSMenuItem *it = [mainMenu itemAtIndex:j];
+            NSMenu *sub = [it submenu];
+            if (sub && [sub.title isEqualToString:appName]) { appMenu = sub; break; }
+        }
+        // 2) 回退：第一个带 submenu 的菜单项（SwiftUI 菜单可能为空骨架，也要插入）
+        if (!appMenu) {
+            for (NSInteger j = 0; j < n; j++) {
+                NSMenuItem *it = [mainMenu itemAtIndex:j];
+                if ([it submenu]) { appMenu = [it submenu]; break; }
+            }
+        }
+        if (!appMenu) {
+            DebugLog(@"TryInsertAbout: 无可用应用菜单 (mainMenu items=%ld)", (long)n);
+            return NO;
+        }
 
         BOOL hasAbout = NO, hasQuit = NO;
         for (NSMenuItem *it in appMenu.itemArray) {
@@ -153,6 +178,11 @@ static BOOL TryInsertAbout(void) {
                 [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
             }
             if (!hasQuit) [appMenu addItem:quitItem];
+            DebugLog(@"TryInsertAbout: 已插入 about/quit 到菜单「%@」(items=%ld)",
+                     appMenu.title, (long)[appMenu numberOfItems]);
+        } else {
+            DebugLog(@"TryInsertAbout: 已存在 about/quit，无需插入 (items=%ld)",
+                     (long)[appMenu numberOfItems]);
         }
         return YES;
     }
@@ -189,19 +219,39 @@ static void InsertAboutFallback(void) {
 /// copy 时捕获到失效指针 → EXC_BAD_ACCESS（jmp *0x10(null)）崩溃。
 static void ScheduleAboutCheck(int attempt) {
     if (attempt >= 30) {
+        DebugLog(@"ScheduleAboutCheck: 30 次仍未就绪，走兜底");
         InsertAboutFallback();
         return;
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        if (TryInsertAbout()) return; // 插入成功，结束
+        if (TryInsertAbout()) {
+            // 插入成功，但 SwiftUI 可能随后重建菜单覆盖 → 持续确认防覆盖
+            ScheduleAboutConfirm(1);
+            return;
+        }
         ScheduleAboutCheck(attempt + 1);
+    });
+}
+
+/// 插入成功后的确认：SwiftUI 在 macOS 12+ 上可能启动后数秒内重建菜单，
+/// 覆盖我们插入的关于/退出。每 1s 幂等重插一次（TryInsertAbout 内部幂等），
+/// 覆盖启动后约 6 秒的窗口期。
+static void ScheduleAboutConfirm(int attempt) {
+    if (attempt >= 6) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        TryInsertAbout(); // 幂等：若被覆盖则重新插入，若还在则跳过
+        ScheduleAboutConfirm(attempt + 1);
     });
 }
 
 /// 主菜单就绪后插入「关于/退出」。异步轮询，主线程只做轻量操作（不阻塞、不卡彩虹球）。
 static void InsertAboutItem(void) {
-    if (TryInsertAbout()) return; // 已就绪，一次成功（绝大多数情况）
+    if (TryInsertAbout()) {
+        ScheduleAboutConfirm(1); // 防 SwiftUI 重建覆盖
+        return;
+    }
     ScheduleAboutCheck(1);
 }
 
