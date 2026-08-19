@@ -426,7 +426,7 @@ static void SwizzleMenuMethods(void) {
         orig_app_setMainMenu = (void *)method_getImplementation(m);
         class_replaceMethod(appCls, @selector(setMainMenu:), (IMP)my_app_setMainMenu, method_getTypeEncoding(m));
     }
-    FileLog(@"SwizzleMenuMethods: NSMenu+setMainMenu 已 hook (V40)");
+    FileLog(@"SwizzleMenuMethods: NSMenu+setMainMenu 已 hook (2.0)");
 }
 
 /// 安装新版后迁移旧版配置：把旧名文件夹（开机静默启动器）里用户真实的

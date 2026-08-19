@@ -11,11 +11,11 @@
 #     - 开机自启（launchAtLogin）首次安装默认关闭：ensureLoginItemInstalledOnce 置为 no-op（不再自动注册 LaunchAgent）
 #     - about_inject.dylib 彩虹球修复：ShowFirstLaunchGuide 移后台线程、InsertAboutItem 改异步轮询
 #  5) V36：检测总时长 stepper 步长 10→5 秒（指令立即数补丁，见 patch_stepper_step 注释）
-# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.36
+# 用法: ./build_silent_launcher.sh [版本号]   # 默认 2.0
 set -e
 set -o pipefail
 
-VERSION="${1:-1.36}"
+VERSION="${1:-2.0}"
 echo "=== SilentLauncher Build v$VERSION ==="
 
 # 二进制等长替换：原版二进制里硬编码的旧名「开机静默启动器」(21字节 UTF-8)
