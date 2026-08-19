@@ -10,10 +10,10 @@
 #     - 全局静默（globalSilent）默认 true→false：PollSettings.init / ContentView 失败兜底 共 4 处（x86_64 2 + arm64 2）
 #     - 开机自启（launchAtLogin）首次安装默认关闭：ensureLoginItemInstalledOnce 置为 no-op（不再自动注册 LaunchAgent）
 #     - about_inject.dylib 彩虹球修复：ShowFirstLaunchGuide 移后台线程、InsertAboutItem 改异步轮询
-# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.26
+# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.35
 set -e
 
-VERSION="${1:-1.26}"
+VERSION="${1:-1.35}"
 echo "=== SilentLauncher Build v$VERSION ==="
 
 # 二进制等长替换：原版二进制里硬编码的旧名「开机静默启动器」(21字节 UTF-8)
@@ -191,6 +191,57 @@ print("v25 defaults patched: globalSilent=false, ensureLoginItemInstalledOnce=no
 PY
 }
 
+# V35：检测总时长 stepper 步长 10 → 5 秒
+#  step 常量紧邻 range 下界之前：
+#    universal x86_64 slice: +0x28B90 / +0x28B98（全局 183184/183192）
+#    universal arm64   slice: +0x2A5D0（全局 779728）
+#    10.15 单架构 x86_64:     +0x2B090 / +0x2B098（全局 176272/176280）
+patch_stepper_step() {
+  local BIN="$1"
+  python3 - "$BIN" <<'PY'
+import sys, struct as st
+p = sys.argv[1]
+data = bytearray(open(p, "rb").read())
+
+def is_fat(buf):
+    return buf[:4] == b"\xca\xfe\xba\xbe"
+
+def fat_slices(buf):
+    nfat = st.unpack(">I", buf[4:8])[0]
+    archs = []
+    for i in range(nfat):
+        off = 8 + i * 20
+        ct, _, offset, size, _ = st.unpack(">IIIII", buf[off:off+20])
+        archs.append((ct, offset, size))
+    return {ct: (off, sz) for ct, off, sz in archs}
+
+def apply(buf, base, rel, old_h, new_h, desc):
+    off = base + rel
+    old = bytes.fromhex(old_h); new = bytes.fromhex(new_h)
+    assert off + len(old) <= len(buf), f"{desc}: 越界 @{off}"
+    assert buf[off:off+len(old)].hex() == old_h, f"{desc}: 字节不匹配 @{off} (实际 {buf[off:off+len(old)].hex()})"
+    buf[off:off+len(new)] = new
+    print(f"  {desc} @ {off}")
+
+pat10 = st.pack("<d", 10.0).hex()
+pat5  = st.pack("<d", 5.0).hex()
+
+if is_fat(data):
+    by = fat_slices(data)
+    x86_base, _ = by[0x1000007]
+    arm_base, _ = by[0x100000C]
+    apply(data, x86_base, 0x28B90, pat10, pat5, "x86_64 stepper step 10->5 #1")
+    apply(data, x86_base, 0x28B98, pat10, pat5, "x86_64 stepper step 10->5 #2")
+    apply(data, arm_base, 0x2A5D0, pat10, pat5, "arm64 stepper step 10->5")
+else:
+    apply(data, 0, 0x2B090, pat10, pat5, "10.15 stepper step 10->5 #1")
+    apply(data, 0, 0x2B098, pat10, pat5, "10.15 stepper step 10->5 #2")
+
+open(p, "wb").write(bytes(data))
+print("stepper step patched: 10 -> 5")
+PY
+}
+
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 OUTDIR="/Users/banqiu/Downloads/workbuddy 项目/开机静默"
 SRC_12="/Users/banqiu/Downloads/workbuddy 项目/开机静默/12-静默启动管理器-V20.dmg"
@@ -226,6 +277,7 @@ patch_binary "$MACOS_12/SilentLauncher.real"
 patch_duration_range "$MACOS_12/SilentLauncher.real"
 patch_default_pollsettings "$MACOS_12/SilentLauncher.real"
 patch_defaults_v25 "$MACOS_12/SilentLauncher.real"
+patch_stepper_step "$MACOS_12/SilentLauncher.real"
 cp "$DYLIB" "$RES_12/about_inject.dylib"
 cp "$STRINGS" "$RES_12/strings.txt"
 cat > "$MACOS_12/SilentLauncher" <<'EOF'
@@ -272,6 +324,7 @@ patch_binary "$MACOS_15/SilentLauncher.real"
 patch_duration_range "$MACOS_15/SilentLauncher.real"
 patch_default_pollsettings "$MACOS_15/SilentLauncher.real"
 patch_defaults_v25 "$MACOS_15/SilentLauncher.real"
+patch_stepper_step "$MACOS_15/SilentLauncher.real"
 cp "$DYLIB" "$RES_15/about_inject.dylib"
 cp "$STRINGS" "$RES_15/strings.txt"
 cat > "$MACOS_15/SilentLauncher" <<'EOF'
