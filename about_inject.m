@@ -142,75 +142,83 @@ static void ShowFirstLaunchGuide(void) {
 }
 
 /// +
-static void InsertAboutItem(void) {
+/// 尝试把「关于/退出」插入现有主菜单；返回 YES 表示成功（幂等）。
+/// 插入逻辑 = V30 验证有效的方式（找第一个带 submenu 的菜单项插入）。
+static BOOL TryInsertAbout(void) {
     @autoreleasepool {
         NSApplication *app = [NSApplication sharedApplication];
-
-        NSDictionary *S = LoadStrings();
         NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
         if (!appName || [appName length] == 0) appName = @"SilentLauncher";
         NSString *aboutTitle = [@"关于 " stringByAppendingString:appName];
         NSString *quitTitle  = [@"退出 " stringByAppendingString:appName];
 
-        __block NSMenuItem *aboutItem = nil;
-        __block NSMenuItem *quitItem = nil;
-        void (^makeItems)(void) = ^{
-            if (!aboutItem) {
-                aboutItem = [[NSMenuItem alloc] initWithTitle:aboutTitle action:@selector(showCustomAbout) keyEquivalent:@""];
-                [aboutItem setTarget:app];
-            }
-            if (!quitItem) {
-                quitItem = [[NSMenuItem alloc] initWithTitle:quitTitle action:@selector(terminate:) keyEquivalent:@"q"];
-                [quitItem setTarget:app];
-            }
-        };
-
-        // SwiftUI 应用的主菜单在启动完成后异步构建，Intel/10.15 慢速机器上更晚；
-        // 轮询等待菜单就绪（最多 15 秒），就绪即插入「关于/退出」。
-        for (int i = 0; i < 30; i++) {
-            NSMenu *mainMenu = [app mainMenu];
-            NSMenu *appMenu = nil;
-            if (mainMenu) {
-                NSInteger n = [mainMenu numberOfItems];
-                // 找第一个带 submenu 的菜单项（通常是 App 菜单）
-                for (NSInteger j = 0; j < n; j++) {
-                    NSMenuItem *it = [mainMenu itemAtIndex:j];
-                    if ([it submenu]) { appMenu = [it submenu]; break; }
-                }
-            }
-            if (!mainMenu) { FileLog(@"InsertAboutItem: mainMenu 为 nil (i=%d)", i); }
-            if (appMenu) {
-                BOOL hasAbout = NO, hasQuit = NO;
-                for (NSMenuItem *it in appMenu.itemArray) {
-                    if (it.action == @selector(showCustomAbout)) hasAbout = YES;
-                    if (it.action == @selector(terminate:)) hasQuit = YES;
-                }
-                if (!hasAbout || !hasQuit) {
-                    makeItems();
-                    if (!hasAbout) {
-                        [appMenu insertItem:aboutItem atIndex:0];
-                        [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
-                    }
-                    if (!hasQuit) [appMenu addItem:quitItem];
-                }
-                FileLog(@"InsertAboutItem: 已插入 about/quit (appMenu=「%@」 items=%ld)", appMenu.title, (long)[appMenu numberOfItems]);
-                return; // 插入成功
-            }
-            if (i < 29) usleep(500000);
+        NSMenu *mainMenu = [app mainMenu];
+        if (!mainMenu) return NO;
+        NSMenu *appMenu = nil;
+        NSInteger n = [mainMenu numberOfItems];
+        for (NSInteger j = 0; j < n; j++) {
+            NSMenuItem *it = [mainMenu itemAtIndex:j];
+            if ([it submenu]) { appMenu = [it submenu]; break; }
         }
+        if (!appMenu) return NO;
 
-        // 兜底：始终无主菜单 → 创建全新主菜单（含关于/退出），确保关于一定存在
-        makeItems();
+        BOOL hasAbout = NO, hasQuit = NO;
+        for (NSMenuItem *it in appMenu.itemArray) {
+            if (it.action == @selector(showCustomAbout)) hasAbout = YES;
+            if (it.action == @selector(terminate:)) hasQuit = YES;
+        }
+        if (!hasAbout || !hasQuit) {
+            NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:aboutTitle action:@selector(showCustomAbout) keyEquivalent:@""];
+            [aboutItem setTarget:app];
+            NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:quitTitle action:@selector(terminate:) keyEquivalent:@"q"];
+            [quitItem setTarget:app];
+            if (!hasAbout) {
+                [appMenu insertItem:aboutItem atIndex:0];
+                [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
+            }
+            if (!hasQuit) [appMenu addItem:quitItem];
+            FileLog(@"TryInsertAbout: 已插入 about/quit (appMenu=「%@」 items=%ld)", appMenu.title, (long)[appMenu numberOfItems]);
+        }
+        return YES;
+    }
+}
+
+/// V34：先让主线程自由运行 1 秒，给 SwiftUI 构建菜单的时间（不阻塞 → 不卡彩虹球）。
+/// 1 秒后若 submenu 已就绪则立即插入；否则回退 V30/V33 同步 usleep 轮询（阻塞等待，
+/// 保证菜单显示不被覆盖）。兜底创建主菜单。
+static void InsertAboutItem(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (TryInsertAbout()) return; // 空闲期 SwiftUI 已完成构建 → 立即插入，不卡
+
+        // 回退：同步轮询（最多 15 秒），保证菜单显示
+        for (int i = 0; i < 30; i++) {
+            if (TryInsertAbout()) return;
+            usleep(500000);
+        }
+        FileLog(@"InsertAboutItem: 30 次轮询后仍未就绪，兜底创建主菜单");
+        // 兜底：创建全新主菜单（含关于/退出）
+        NSApplication *app = [NSApplication sharedApplication];
+        NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
+        if (!appName || [appName length] == 0) appName = @"SilentLauncher";
         NSMenu *menu = [[NSMenu alloc] initWithTitle:@""];
         NSMenuItem *appItem = [[NSMenuItem alloc] initWithTitle:appName action:nil keyEquivalent:@""];
         NSMenu *appMenu = [[NSMenu alloc] initWithTitle:appName];
+        NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:[@"关于 " stringByAppendingString:appName]
+                                                           action:@selector(showCustomAbout)
+                                                    keyEquivalent:@""];
+        [aboutItem setTarget:app];
+        NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:[@"退出 " stringByAppendingString:appName]
+                                                          action:@selector(terminate:)
+                                                   keyEquivalent:@"q"];
+        [quitItem setTarget:app];
         [appMenu addItem:aboutItem];
         [appMenu addItem:[NSMenuItem separatorItem]];
         [appMenu addItem:quitItem];
         [appItem setSubmenu:appMenu];
         [menu addItem:appItem];
         [app setMainMenu:menu];
-    }
+    });
 }
 
 /// 安装新版后迁移旧版配置：把旧名文件夹（开机静默启动器）里用户真实的
