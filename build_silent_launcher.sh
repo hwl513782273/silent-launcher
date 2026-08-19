@@ -191,11 +191,19 @@ print("v25 defaults patched: globalSilent=false, ensureLoginItemInstalledOnce=no
 PY
 }
 
-# V35：检测总时长 stepper 步长 10 → 5 秒
-#  step 常量紧邻 range 下界之前：
-#    universal x86_64 slice: +0x28B90 / +0x28B98（全局 183184/183192）
-#    universal arm64   slice: +0x2A5D0（全局 779728）
-#    10.15 单架构 x86_64:     +0x2B090 / +0x2B098（全局 176272/176280）
+# V36：检测总时长 stepper 步长 10 → 5 秒（V35 数据区 patch 无效，改为指令立即数 patch）
+# 定位方法：反汇编找 Stepper init 调用点（_$s7SwiftUI7StepperV5value2in4step...lufC），
+# 调用前构造 step 参数的指令：
+#   universal x86_64 slice: movabsq $0x4024000000000000（10.0）@ slice 偏移 0x144B8，
+#     存入 -0x460(%rbp) 后 leaq 传给 rdx（Stepper #1 检测总时长）
+#     （其他 3 处 movabsq 10.0 是 VStack spacing，不动）
+#   universal arm64   slice: movz x8,#0x4024,lsl#48（10.0）@ slice 偏移 0x12B10，
+#     str x8,[x19,#0x4c0]（step 槽位，Stepper #1 的 x2）
+#     （V24 默认值 10.0 的 movz 在 0x...4e8/0x...8f0/0x...8c8/0x...c4 4 处，不动）
+#   10.15 单架构 x86_64: movabsq $0x4024000000000000（10.0）@ 文件偏移 0x10F6A，
+#     同样存 -0x460(%rbp) 传给 rdx
+# 改为 5.0（0x4014000000000000）：movabsq imm 低字节 24 40 -> 14 40；
+#   arm64 movz imm16 0x4024 -> 0x4014（d2e80488 -> d2e80288）
 patch_stepper_step() {
   local BIN="$1"
   python3 - "$BIN" <<'PY'
@@ -223,22 +231,20 @@ def apply(buf, base, rel, old_h, new_h, desc):
     buf[off:off+len(new)] = new
     print(f"  {desc} @ {off}")
 
-pat10 = st.pack("<d", 10.0).hex()
-pat5  = st.pack("<d", 5.0).hex()
-
 if is_fat(data):
     by = fat_slices(data)
     x86_base, _ = by[0x1000007]
     arm_base, _ = by[0x100000C]
-    apply(data, x86_base, 0x28B90, pat10, pat5, "x86_64 stepper step 10->5 #1")
-    apply(data, x86_base, 0x28B98, pat10, pat5, "x86_64 stepper step 10->5 #2")
-    apply(data, arm_base, 0x2A5D0, pat10, pat5, "arm64 stepper step 10->5")
+    # x86_64: movabsq 10.0 的 imm64 在 slice 偏移 0x104B8 + 2 = 0x104BA
+    apply(data, x86_base, 0x104BA, "0000000000002440", "0000000000001440", "x86_64 stepper step 10->5 (movabsq imm)")
+    # arm64: movz x8,#0x4024,lsl#48 -> movz x8,#0x4014,lsl#48
+    apply(data, arm_base, 0x12B10, "8804e8d2", "8802e8d2", "arm64 stepper step 10->5 (movz)")
 else:
-    apply(data, 0, 0x2B090, pat10, pat5, "10.15 stepper step 10->5 #1")
-    apply(data, 0, 0x2B098, pat10, pat5, "10.15 stepper step 10->5 #2")
+    # 10.15 单架构: movabsq 10.0 的 imm64 在文件偏移 0x10F6A + 2 = 0x10F6C
+    apply(data, 0, 0x10F6C, "0000000000002440", "0000000000001440", "10.15 stepper step 10->5 (movabsq imm)")
 
 open(p, "wb").write(bytes(data))
-print("stepper step patched: 10 -> 5")
+print("stepper step patched (instruction immediates): 10 -> 5")
 PY
 }
 
