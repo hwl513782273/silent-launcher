@@ -117,12 +117,6 @@ static void ShowFirstLaunchGuide(void) {
 static void InsertAboutItem(void) {
     @autoreleasepool {
         NSApplication *app = [NSApplication sharedApplication];
-        NSMenu *mainMenu = [app mainMenu];
-        if (!mainMenu || [mainMenu numberOfItems] == 0) return;
-
-        NSMenuItem *appItem = [mainMenu itemAtIndex:0];
-        NSMenu *appMenu = [appItem submenu];
-        if (!appMenu) return;
 
         NSDictionary *S = LoadStrings();
         NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
@@ -130,29 +124,62 @@ static void InsertAboutItem(void) {
         NSString *aboutTitle = [@"关于 " stringByAppendingString:appName];
         NSString *quitTitle  = [@"退出 " stringByAppendingString:appName];
 
-        // /
-        BOOL hasAbout = NO, hasQuit = NO;
-        for (NSMenuItem *it in appMenu.itemArray) {
-            if (it.action == @selector(showCustomAbout)) hasAbout = YES;
-            if (it.action == @selector(terminate:)) hasQuit = YES;
+        __block NSMenuItem *aboutItem = nil;
+        __block NSMenuItem *quitItem = nil;
+        void (^makeItems)(void) = ^{
+            if (!aboutItem) {
+                aboutItem = [[NSMenuItem alloc] initWithTitle:aboutTitle action:@selector(showCustomAbout) keyEquivalent:@""];
+                [aboutItem setTarget:app];
+            }
+            if (!quitItem) {
+                quitItem = [[NSMenuItem alloc] initWithTitle:quitTitle action:@selector(terminate:) keyEquivalent:@"q"];
+                [quitItem setTarget:app];
+            }
+        };
+
+        // SwiftUI 应用的主菜单在启动完成后异步构建，Intel/10.15 慢速机器上更晚；
+        // 轮询等待菜单就绪（最多 15 秒），就绪即插入「关于/退出」。
+        for (int i = 0; i < 30; i++) {
+            NSMenu *mainMenu = [app mainMenu];
+            NSMenu *appMenu = nil;
+            if (mainMenu) {
+                NSInteger n = [mainMenu numberOfItems];
+                // 找第一个带 submenu 的菜单项（通常是 App 菜单）
+                for (NSInteger j = 0; j < n; j++) {
+                    NSMenuItem *it = [mainMenu itemAtIndex:j];
+                    if ([it submenu]) { appMenu = [it submenu]; break; }
+                }
+            }
+            if (appMenu) {
+                BOOL hasAbout = NO, hasQuit = NO;
+                for (NSMenuItem *it in appMenu.itemArray) {
+                    if (it.action == @selector(showCustomAbout)) hasAbout = YES;
+                    if (it.action == @selector(terminate:)) hasQuit = YES;
+                }
+                if (!hasAbout || !hasQuit) {
+                    makeItems();
+                    if (!hasAbout) {
+                        [appMenu insertItem:aboutItem atIndex:0];
+                        [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
+                    }
+                    if (!hasQuit) [appMenu addItem:quitItem];
+                }
+                return; // 插入成功
+            }
+            if (i < 29) usleep(500000);
         }
-        if (!hasAbout) {
-            NSMenuItem *about = [[NSMenuItem alloc]
-                initWithTitle:aboutTitle
-                       action:@selector(showCustomAbout)
-                keyEquivalent:@""];
-            [about setTarget:app];
-            [appMenu insertItem:about atIndex:0];
-            [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
-        }
-        if (!hasQuit) {
-            NSMenuItem *quit = [[NSMenuItem alloc]
-                initWithTitle:quitTitle
-                       action:@selector(terminate:)
-                keyEquivalent:@"q"];
-            [quit setTarget:app];
-            [appMenu addItem:quit];
-        }
+
+        // 兜底：始终无主菜单 → 创建全新主菜单（含关于/退出），确保关于一定存在
+        makeItems();
+        NSMenu *menu = [[NSMenu alloc] initWithTitle:@""];
+        NSMenuItem *appItem = [[NSMenuItem alloc] initWithTitle:appName action:nil keyEquivalent:@""];
+        NSMenu *appMenu = [[NSMenu alloc] initWithTitle:appName];
+        [appMenu addItem:aboutItem];
+        [appMenu addItem:[NSMenuItem separatorItem]];
+        [appMenu addItem:quitItem];
+        [appItem setSubmenu:appMenu];
+        [menu addItem:appItem];
+        [app setMainMenu:menu];
     }
 }
 
