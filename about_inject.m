@@ -157,6 +157,7 @@ static void ShowFirstLaunchGuide(void) {
 /// +
 /// 尝试把「关于/退出」插入现有主菜单；返回 YES 表示成功（幂等）。
 /// 插入逻辑 = V30 验证有效的方式（找第一个带 submenu 的菜单项插入）。
+/// V42 起每次调用都记录结果（成功/失败原因），用于诊断 macOS 12 菜单构建时序。
 static BOOL TryInsertAbout(void) {
     @autoreleasepool {
         NSApplication *app = [NSApplication sharedApplication];
@@ -166,58 +167,83 @@ static BOOL TryInsertAbout(void) {
         NSString *quitTitle  = [@"退出 " stringByAppendingString:appName];
 
         NSMenu *mainMenu = [app mainMenu];
-        if (!mainMenu) return NO;
+        if (!mainMenu) { FileLog(@"TryInsertAbout: FAIL mainMenu=nil"); return NO; }
         NSMenu *appMenu = nil;
         NSInteger n = [mainMenu numberOfItems];
         for (NSInteger j = 0; j < n; j++) {
             NSMenuItem *it = [mainMenu itemAtIndex:j];
             if ([it submenu]) { appMenu = [it submenu]; break; }
         }
-        if (!appMenu) return NO;
+        if (!appMenu) { FileLog(@"TryInsertAbout: FAIL 无 submenu (mainMenu items=%ld)", (long)n); return NO; }
 
         BOOL hasAbout = NO, hasQuit = NO;
         for (NSMenuItem *it in appMenu.itemArray) {
             if (it.action == @selector(showCustomAbout)) hasAbout = YES;
             if (it.action == @selector(terminate:)) hasQuit = YES;
         }
-        if (!hasAbout || !hasQuit) {
-            NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:aboutTitle action:@selector(showCustomAbout) keyEquivalent:@""];
-            [aboutItem setTarget:app];
-            NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:quitTitle action:@selector(terminate:) keyEquivalent:@"q"];
-            [quitItem setTarget:app];
-            // 必须显式 Command 修饰键：默认 mask=0 会导致普通按键 "q" 直接触发退出
-            [quitItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
-            if (!hasAbout) {
-                [appMenu insertItem:aboutItem atIndex:0];
-                [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
-            }
-            if (!hasQuit) [appMenu addItem:quitItem];
-            FileLog(@"TryInsertAbout: 已插入 about/quit (appMenu=「%@」 items=%ld)", appMenu.title, (long)[appMenu numberOfItems]);
+        if (hasAbout && hasQuit) {
+            FileLog(@"TryInsertAbout: OK 已存在 (appMenu=「%@」 items=%ld)", appMenu.title, (long)[appMenu numberOfItems]);
+            return YES;
         }
+        NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:aboutTitle action:@selector(showCustomAbout) keyEquivalent:@""];
+        [aboutItem setTarget:app];
+        NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:quitTitle action:@selector(terminate:) keyEquivalent:@"q"];
+        [quitItem setTarget:app];
+        // 必须显式 Command 修饰键：默认 mask=0 会导致普通按键 "q" 直接触发退出
+        [quitItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
+        if (!hasAbout) {
+            [appMenu insertItem:aboutItem atIndex:0];
+            [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
+        }
+        if (!hasQuit) [appMenu addItem:quitItem];
+        FileLog(@"TryInsertAbout: INSERTED about/quit (appMenu=「%@」 items=%ld)", appMenu.title, (long)[appMenu numberOfItems]);
         return YES;
     }
 }
 
-/// V40：非阻塞周期检查兜底——每 0.5s 主线程 TryInsertAbout 一次（纯遍历微秒级，
-/// 无 usleep，不会卡彩虹球），持续约 30s。覆盖 hook 可能漏掉的 SwiftUI 重建路径。
-/// 用 C 函数递归（block 只捕获 int，避免 V25 的 block 捕获 block 崩溃）。
-static void SchedulePeriodicCheck(int attempt) {
-    if (attempt >= 60) return;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+/// V42 诊断：每 2 秒打印一次主菜单结构（顶层项标题 / submenu / items 数），
+/// 持续约 30 秒，用于还原 macOS 12 上 SwiftUI 菜单构建的真实时序。
+static void DiagnoseMenuStructure(int seq) {
+    if (seq >= 15) return; // 15 × 2s = 30s
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        TryInsertAbout();
-        SchedulePeriodicCheck(attempt + 1);
+        NSApplication *app = [NSApplication sharedApplication];
+        NSMenu *mainMenu = [app mainMenu];
+        if (!mainMenu) {
+            FileLog(@"DIAG[%d]: mainMenu=nil", seq);
+        } else {
+            NSMutableString *sb = [NSMutableString stringWithFormat:@"DIAG[%d]: mainMenu items=%ld:", seq, (long)[mainMenu numberOfItems]];
+            for (NSInteger j = 0; j < [mainMenu numberOfItems]; j++) {
+                NSMenuItem *it = [mainMenu itemAtIndex:j];
+                NSMenu *sub = [it submenu];
+                [sb appendFormat:@" [%@ sub=%@ items=%ld]", it.title ?: @"(nil)", sub ? @"Y" : @"N", sub ? (long)[sub numberOfItems] : -1];
+            }
+            FileLog(@"%@", sb);
+        }
+        DiagnoseMenuStructure(seq + 1);
     });
 }
 
-/// V40：菜单插入 = 1 秒空闲先插 + hook 自动补回（主力）+ 非阻塞周期检查（兜底）。
-/// 无任何 usleep → 主线程零阻塞 → 彩虹球根除。
-static void InsertAboutItem(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+/// V42：低频退避重插——按递增间隔尝试插入（1s/4s/8s/12s/16s/20s/26s/32s），
+/// 避开 SwiftUI 菜单构建高峰期（macOS 12 实测 submenu 约 10s 才出现），
+/// 构建完成后再插一次成功率高。全程主线程微秒级操作，无 usleep → 不卡彩虹球。
+static void ScheduleInsertAttempt(int step) {
+    static const double delays[] = {1.0, 3.0, 4.0, 4.0, 4.0, 4.0, 6.0, 6.0, 8.0};
+    int total = sizeof(delays) / sizeof(delays[0]);
+    if (step >= total) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[step] * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         TryInsertAbout();
+        ScheduleInsertAttempt(step + 1);
     });
-    SchedulePeriodicCheck(0);
+}
+
+/// V42：菜单插入 = 1 秒先插 + hook 自动补回（主力）+ 低频退避重插（兜底）。
+/// 无任何 usleep → 主线程零阻塞 → 彩虹球根除。
+static void InsertAboutItem(void) {
+    TryInsertAbout(); // 立即试一次（大多数系统第 0 次就绪）
+    ScheduleInsertAttempt(0);
+    DiagnoseMenuStructure(0);
 }
 
 /// V38-beta（实验）方案 A：hook NSMenu 修改方法，SwiftUI 每次重建菜单后自动补回
@@ -273,6 +299,7 @@ static void MenuDidMutate(NSMenu *menu) {
 
     // 1) 被修改的菜单自身就是应用菜单（标题 == appName）→ 补回
     if ([menu.title isEqualToString:appName]) {
+        FileLog(@"HOOK: mutate 「%@」 items=%ld → 补回", menu.title, (long)[menu numberOfItems]);
         EnsureAboutQuitInMenu(menu);
         return;
     }
@@ -280,6 +307,7 @@ static void MenuDidMutate(NSMenu *menu) {
     NSMenu *mainMenu = [app mainMenu];
     if (!mainMenu) return;
     if (menu == mainMenu) {
+        FileLog(@"HOOK: mutate mainMenu items=%ld → 定位补回", (long)[mainMenu numberOfItems]);
         for (NSMenuItem *it in mainMenu.itemArray) {
             if ([it submenu]) { EnsureAboutQuitInMenu([it submenu]); return; }
         }
