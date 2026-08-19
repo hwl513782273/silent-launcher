@@ -6,10 +6,14 @@
 #     （解决 Intel/10.15 慢速机器上 SwiftUI 菜单构建晚导致「关于」菜单插不上的问题）
 #  3) V24：默认检测总时长 180→10 秒（PollSettings 默认值；x86_64 数据 2 处 + arm64 数据 1 处 + arm64 指令 4 处）
 #     检测间隔默认 2 秒保持不变（已是目标值）
-# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.24
+#  4) V25：首次安装默认值修正 + 彩虹球修复
+#     - 全局静默（globalSilent）默认 true→false：PollSettings.init / ContentView 失败兜底 共 4 处（x86_64 2 + arm64 2）
+#     - 开机自启（launchAtLogin）首次安装默认关闭：ensureLoginItemInstalledOnce 置为 no-op（不再自动注册 LaunchAgent）
+#     - about_inject.dylib 彩虹球修复：ShowFirstLaunchGuide 移后台线程、InsertAboutItem 改异步轮询
+# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.25
 set -e
 
-VERSION="${1:-1.24}"
+VERSION="${1:-1.25}"
 echo "=== SilentLauncher Build v$VERSION ==="
 
 # 二进制等长替换：原版二进制里硬编码的旧名「开机静默启动器」(21字节 UTF-8)
@@ -123,6 +127,70 @@ print("default pollsettings patched: finalTime 180->10 (interval stays 2.0)")
 PY
 }
 
+# V25：首次安装默认值修正
+#  A) globalSilent 默认 true→false（mov w0,#1 -> mov w0,#0 / movb $1,%al -> movb $0,%al）
+#     arm64: PollSettings.init (+0x8160)、ContentView._settings 失败兜底 (+0x839c)
+#     x86_64: PollSettings.init (+0x5344)、ContentView._settings 失败兜底 (+0xc937)
+#  B) launchAtLogin 首次安装默认关闭：ensureLoginItemInstalledOnce 置为 no-op（直接 ret）
+#     arm64 @+0xcefc（stp...  -> ret 0xd65f03c0）；x86_64 @+0xa410（pushq %rbp 0x55 -> ret 0xc3）
+# V25：首次安装默认值修正
+#  A) globalSilent 默认 true→false（mov w0,#1 -> mov w0,#0 / movb $1,%al -> movb $0,%al）
+#     universal x86_64 slice: PollSettings.init (+0x5344)、ContentView 失败兜底 (+0xc937)
+#     universal arm64   slice: PollSettings.init (+0x8160)、ContentView 失败兜底 (+0x839c)
+#     10.15 单架构 x86_64（模块 main）: PollSettings.init (+0x5bd4)、ContentView 失败兜底 (+0xd3e7)
+#  B) launchAtLogin 首次安装默认关闭：ensureLoginItemInstalledOnce 置为 no-op（直接 ret）
+#     universal arm64 @+0xcefc（stp... -> ret 0xd65f03c0）
+#     universal x86_64 @+0xa410、10.15 单架构 @+0xac60（pushq %rbp 0x55 -> ret 0xc3）
+patch_defaults_v25() {
+  local BIN="$1"
+  python3 - "$BIN" <<'PY'
+import sys, struct as st
+p = sys.argv[1]
+data = bytearray(open(p, "rb").read())
+
+def is_fat(buf):
+    return buf[:4] == b"\xca\xfe\xba\xbe"
+
+def fat_slices(buf):
+    nfat = st.unpack(">I", buf[4:8])[0]
+    archs = []
+    for i in range(nfat):
+        off = 8 + i * 20
+        ct, _, offset, size, _ = st.unpack(">IIIII", buf[off:off+20])
+        archs.append((ct, offset, size))
+    return {ct: (off, sz) for ct, off, sz in archs}
+
+def apply(buf, base, rel, old_h, new_h, desc):
+    off = base + rel
+    old = bytes.fromhex(old_h); new = bytes.fromhex(new_h)
+    assert off + len(old) <= len(buf), f"{desc}: 越界 @{off}"
+    assert buf[off:off+len(old)].hex() == old_h, f"{desc}: 字节不匹配 @{off} (实际 {buf[off:off+len(old)].hex()})"
+    buf[off:off+len(new)] = new
+    print(f"  {desc} @ {off}")
+
+if is_fat(data):
+    by = fat_slices(data)
+    x86_base, x86_size = by[0x1000007]
+    arm_base, arm_size = by[0x100000C]
+    # arm64: globalSilent 2 处 + ensureLogin no-op
+    apply(data, arm_base, 0x8160, "20008052", "00008052", "arm64 PollSettings.init globalSilent true->false")
+    apply(data, arm_base, 0x839c, "20008052", "00008052", "arm64 ContentView 失败兜底 globalSilent true->false")
+    apply(data, arm_base, 0xcefc, "fc6fbaa9", "c0035fd6", "arm64 ensureLoginItemInstalledOnce -> ret")
+    # x86_64 slice: globalSilent 2 处 + ensureLogin no-op
+    apply(data, x86_base, 0x5344, "b001", "b000", "x86_64 PollSettings.init globalSilent true->false")
+    apply(data, x86_base, 0xc937, "b001", "b000", "x86_64 ContentView 失败兜底 globalSilent true->false")
+    apply(data, x86_base, 0xa410, "55", "c3", "x86_64 ensureLoginItemInstalledOnce -> ret")
+else:
+    # 10.15 单架构 x86_64（模块 main，偏移独立）
+    apply(data, 0, 0x5bd4, "b001", "b000", "10.15 PollSettings.init globalSilent true->false")
+    apply(data, 0, 0xd3e7, "b001", "b000", "10.15 ContentView 失败兜底 globalSilent true->false")
+    apply(data, 0, 0xac60, "55", "c3", "10.15 ensureLoginItemInstalledOnce -> ret")
+
+open(p, "wb").write(bytes(data))
+print("v25 defaults patched: globalSilent=false, ensureLoginItemInstalledOnce=noop")
+PY
+}
+
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 OUTDIR="/Users/banqiu/Downloads/workbuddy 项目/开机静默"
 SRC_12="/Users/banqiu/Downloads/workbuddy 项目/开机静默/12-静默启动管理器-V20.dmg"
@@ -157,6 +225,7 @@ mv "$MACOS_12/SilentLauncher" "$MACOS_12/SilentLauncher.real"
 patch_binary "$MACOS_12/SilentLauncher.real"
 patch_duration_range "$MACOS_12/SilentLauncher.real"
 patch_default_pollsettings "$MACOS_12/SilentLauncher.real"
+patch_defaults_v25 "$MACOS_12/SilentLauncher.real"
 cp "$DYLIB" "$RES_12/about_inject.dylib"
 cp "$STRINGS" "$RES_12/strings.txt"
 cat > "$MACOS_12/SilentLauncher" <<'EOF'
@@ -202,6 +271,7 @@ mv "$MACOS_15/SilentLauncher" "$MACOS_15/SilentLauncher.real"
 patch_binary "$MACOS_15/SilentLauncher.real"
 patch_duration_range "$MACOS_15/SilentLauncher.real"
 patch_default_pollsettings "$MACOS_15/SilentLauncher.real"
+patch_defaults_v25 "$MACOS_15/SilentLauncher.real"
 cp "$DYLIB" "$RES_15/about_inject.dylib"
 cp "$STRINGS" "$RES_15/strings.txt"
 cat > "$MACOS_15/SilentLauncher" <<'EOF'
