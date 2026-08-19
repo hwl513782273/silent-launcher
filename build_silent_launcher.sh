@@ -4,10 +4,12 @@
 #  1) 监测总时长 range 下界 30→10 秒（二进制 double 等长补丁，x86_64/arm64 各 slice 1 处）
 #  2) about_inject.dylib：InsertAboutItem 改为轮询等待 SwiftUI 主菜单就绪 + 兜底创建主菜单
 #     （解决 Intel/10.15 慢速机器上 SwiftUI 菜单构建晚导致「关于」菜单插不上的问题）
-# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.22
+#  3) V24：默认检测总时长 180→10 秒（PollSettings 默认值；x86_64 数据 2 处 + arm64 数据 1 处 + arm64 指令 4 处）
+#     检测间隔默认 2 秒保持不变（已是目标值）
+# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.24
 set -e
 
-VERSION="${1:-1.22}"
+VERSION="${1:-1.24}"
 echo "=== SilentLauncher Build v$VERSION ==="
 
 # 二进制等长替换：原版二进制里硬编码的旧名「开机静默启动器」(21字节 UTF-8)
@@ -57,6 +59,70 @@ print(f"duration range patched 30->10 at {hits}")
 PY
 }
 
+# 修复「默认检测总时长」：180.0 → 10.0（PollSettings 默认值）
+#  - x86_64：数据常量 2 处（均紧邻 interval=2.0）
+#  - arm64：数据常量 1 处 + 指令立即数 4 处
+#    （movz/movk 构造 0x4066800000000000=180.0 → movz x8,#0x4024,lsl#48 + nop，构造 0x4024000000000000=10.0）
+# 检测间隔默认 2.0 已是目标值，不改。
+# 兼容 universal（x86_64+arm64）与单架构 x86_64 两种格式。
+patch_default_pollsettings() {
+  local BIN="$1"
+  python3 - "$BIN" <<'PY'
+import sys, struct as st
+p = sys.argv[1]
+data = bytearray(open(p, "rb").read())
+
+def patch_slice(buf, base, size, label, expect_data, expect_insn=0):
+    pat180 = st.pack("<d", 180.0)
+    pat10  = st.pack("<d", 10.0)
+    hits = []
+    s = base
+    while True:
+        i = buf.find(pat180, s, base + size)
+        if i < 0: break
+        hits.append(i); s = i + 1
+    assert len(hits) == expect_data, f"{label} 期望 {expect_data} 处 180.0 数据，实际 {len(hits)}: {hits}"
+    for off in hits:
+        buf[off:off+8] = pat10
+    print(f"{label} data patched 180->10 at {hits}")
+
+    if expect_insn:
+        pair = st.pack("<I", 0xd2d00008) + st.pack("<I", 0xf2e80cc8)
+        new_pair = st.pack("<I", 0xd2e80488) + st.pack("<I", 0xd503201f)
+        hits = []
+        s = base
+        while True:
+            i = buf.find(pair, s, base + size)
+            if i < 0: break
+            hits.append(i); s = i + 1
+        assert len(hits) == expect_insn, f"{label} 期望 {expect_insn} 处 movz/movk，实际 {len(hits)}: {hits}"
+        for off in hits:
+            buf[off:off+8] = new_pair
+        print(f"{label} insn patched 180->10 at {hits}")
+
+if data[:4] == b"\xca\xfe\xba\xbe":
+    # universal fat：解析两个 slice
+    nfat = st.unpack(">I", data[4:8])[0]
+    archs = []
+    for i in range(nfat):
+        off = 8 + i * 20
+        cputype, _, offset, size, _ = st.unpack(">IIIII", data[off:off+20])
+        archs.append((cputype, offset, size))
+    by_type = {ct: (off, sz) for ct, off, sz in archs}
+    x86_base, x86_size = by_type[0x1000007]
+    arm_base, arm_size = by_type[0x100000C]
+    patch_slice(data, x86_base, x86_size, "x86_64", expect_data=2)
+    patch_slice(data, arm_base, arm_size, "arm64", expect_data=1, expect_insn=4)
+else:
+    # 单架构：期望纯 x86_64（10.15 版），2 处数据常量
+    patch_slice(data, 0, len(data), "x86_64-only", expect_data=2)
+
+assert data.find(st.pack("<d", 180.0)) == -1, "180.0 仍有残留！"
+open(p, "wb").write(bytes(data))
+print("default pollsettings patched: finalTime 180->10 (interval stays 2.0)")
+PY
+}
+
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 OUTDIR="/Users/banqiu/Downloads/workbuddy 项目/开机静默"
 SRC_12="/Users/banqiu/Downloads/workbuddy 项目/开机静默/12-静默启动管理器-V20.dmg"
@@ -90,6 +156,7 @@ plutil -replace CFBundleDisplayName -string "静默启动管理器" "$PLIST_12"
 mv "$MACOS_12/SilentLauncher" "$MACOS_12/SilentLauncher.real"
 patch_binary "$MACOS_12/SilentLauncher.real"
 patch_duration_range "$MACOS_12/SilentLauncher.real"
+patch_default_pollsettings "$MACOS_12/SilentLauncher.real"
 cp "$DYLIB" "$RES_12/about_inject.dylib"
 cp "$STRINGS" "$RES_12/strings.txt"
 cat > "$MACOS_12/SilentLauncher" <<'EOF'
@@ -134,6 +201,7 @@ plutil -replace CFBundleDisplayName -string "静默启动管理器" "$PLIST_15"
 mv "$MACOS_15/SilentLauncher" "$MACOS_15/SilentLauncher.real"
 patch_binary "$MACOS_15/SilentLauncher.real"
 patch_duration_range "$MACOS_15/SilentLauncher.real"
+patch_default_pollsettings "$MACOS_15/SilentLauncher.real"
 cp "$DYLIB" "$RES_15/about_inject.dylib"
 cp "$STRINGS" "$RES_15/strings.txt"
 cat > "$MACOS_15/SilentLauncher" <<'EOF'
