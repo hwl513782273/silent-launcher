@@ -198,16 +198,26 @@ static BOOL TryInsertAbout(void) {
     }
 }
 
-/// V39：菜单插入 = 1 秒空闲先插（最快路径）+ hook 自动补回（主力，见下方 swizzle）。
-/// 已移除 V34 的同步 usleep 轮询兜底——V38-beta 用户实测 hook 能稳定保持菜单显示，
-/// 阻塞轮询只会卡彩虹球且不再必要（菜单一旦被 SwiftUI 建出，hook 即自动补回）。
-/// 主线程零阻塞 → 彩虹球根除。
+/// V40：非阻塞周期检查兜底——每 0.5s 主线程 TryInsertAbout 一次（纯遍历微秒级，
+/// 无 usleep，不会卡彩虹球），持续约 30s。覆盖 hook 可能漏掉的 SwiftUI 重建路径。
+/// 用 C 函数递归（block 只捕获 int，避免 V25 的 block 捕获 block 崩溃）。
+static void SchedulePeriodicCheck(int attempt) {
+    if (attempt >= 60) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        TryInsertAbout();
+        SchedulePeriodicCheck(attempt + 1);
+    });
+}
+
+/// V40：菜单插入 = 1 秒空闲先插 + hook 自动补回（主力）+ 非阻塞周期检查（兜底）。
+/// 无任何 usleep → 主线程零阻塞 → 彩虹球根除。
 static void InsertAboutItem(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        // 1 秒空闲期 SwiftUI 通常已建好菜单 → 直接插入（幂等）；失败也无妨，hook 兜底
         TryInsertAbout();
     });
+    SchedulePeriodicCheck(0);
 }
 
 /// V38-beta（实验）方案 A：hook NSMenu 修改方法，SwiftUI 每次重建菜单后自动补回
@@ -250,20 +260,33 @@ static void EnsureAboutQuitInMenu(NSMenu *appMenu) {
     g_reinserting = NO;
 }
 
-/// 任意 NSMenu 被修改后回调：定位应用菜单（mainMenu 第一个带 submenu 的顶层项），
-/// 若被修改的正是应用菜单或主菜单，则确保关于/退出存在。
+/// V40：任意 NSMenu 被修改后回调。
+/// macOS 15（就地更新）：被改的 menu == 当前 mainMenu 的 submenu → 直接补回。
+/// macOS 12（SwiftUI 构建全新菜单树再 setMainMenu 整体替换）：被改的 menu 是
+/// 新树中的菜单（还不是 mainMenu）——用「标题 == appName」识别它并补回，
+/// 配合 setMainMenu: hook（下方）在整树替换后再次兜底。
 static void MenuDidMutate(NSMenu *menu) {
     if (g_reinserting) return; // 我们自己补回时不再触发
     NSApplication *app = [NSApplication sharedApplication];
+    NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
+    if (!appName || [appName length] == 0) appName = @"SilentLauncher";
+
+    // 1) 被修改的菜单自身就是应用菜单（标题 == appName）→ 补回
+    if ([menu.title isEqualToString:appName]) {
+        EnsureAboutQuitInMenu(menu);
+        return;
+    }
+    // 2) 被修改的是当前 mainMenu 或其第一个 submenu → 定位应用菜单补回
     NSMenu *mainMenu = [app mainMenu];
     if (!mainMenu) return;
-    NSMenu *appMenu = nil;
-    for (NSMenuItem *it in mainMenu.itemArray) {
-        if ([it submenu]) { appMenu = [it submenu]; break; }
+    if (menu == mainMenu) {
+        for (NSMenuItem *it in mainMenu.itemArray) {
+            if ([it submenu]) { EnsureAboutQuitInMenu([it submenu]); return; }
+        }
+        return;
     }
-    if (!appMenu) return;
-    if (menu == mainMenu || menu == appMenu) {
-        EnsureAboutQuitInMenu(appMenu);
+    for (NSMenuItem *it in mainMenu.itemArray) {
+        if ([it submenu] == menu) { EnsureAboutQuitInMenu(menu); return; }
     }
 }
 
@@ -273,6 +296,7 @@ static void (*orig_menu_insertItem)(id, SEL, id, NSInteger);
 static void (*orig_menu_removeItemAtIndex)(id, SEL, NSInteger);
 static void (*orig_menu_removeAllItems)(id, SEL);
 static void (*orig_menu_setSubmenu)(id, SEL, NSMenu *, NSMenuItem *);
+static void (*orig_app_setMainMenu)(id, SEL, NSMenu *);
 
 static void my_menu_addItem(id self, SEL _cmd, id item) {
     orig_menu_addItem(self, _cmd, item);
@@ -295,7 +319,20 @@ static void my_menu_setSubmenu(id self, SEL _cmd, NSMenu *submenu, NSMenuItem *i
     MenuDidMutate(self);
 }
 
-/// swizzle NSMenu 修改方法；失败静默（不影响主功能）
+/// V40：hook NSApplication.setMainMenu:——macOS 12 的 SwiftUI 会整体替换主菜单树，
+/// 替换后对新树立即补回（延迟一个 runloop，确保树已填完）。
+static void my_app_setMainMenu(id self, SEL _cmd, NSMenu *menu) {
+    orig_app_setMainMenu(self, _cmd, menu);
+    if (menu) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            for (NSMenuItem *it in menu.itemArray) {
+                if ([it submenu]) { EnsureAboutQuitInMenu([it submenu]); return; }
+            }
+        });
+    }
+}
+
+/// swizzle NSMenu 修改方法 + NSApplication.setMainMenu:；失败静默（不影响主功能）
 static void SwizzleMenuMethods(void) {
     Class cls = [NSMenu class];
     Method m;
@@ -309,7 +346,14 @@ static void SwizzleMenuMethods(void) {
     SWZ(removeAllItems, orig_menu_removeAllItems, my_menu_removeAllItems)
     SWZ(setSubmenu:forItem:, orig_menu_setSubmenu, my_menu_setSubmenu)
 #undef SWZ
-    FileLog(@"SwizzleMenuMethods: NSMenu 修改方法已 hook (V38-beta)");
+    // NSApplication.setMainMenu:（self 是 NSApplication）
+    Class appCls = [NSApplication class];
+    m = class_getInstanceMethod(appCls, @selector(setMainMenu:));
+    if (m) {
+        orig_app_setMainMenu = (void *)method_getImplementation(m);
+        class_replaceMethod(appCls, @selector(setMainMenu:), (IMP)my_app_setMainMenu, method_getTypeEncoding(m));
+    }
+    FileLog(@"SwizzleMenuMethods: NSMenu+setMainMenu 已 hook (V40)");
 }
 
 /// 安装新版后迁移旧版配置：把旧名文件夹（开机静默启动器）里用户真实的
