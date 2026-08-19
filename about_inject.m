@@ -83,11 +83,9 @@ static void ShowCustomAbout(void) {
     } @catch (NSException *e) { /*  */ }
 }
 
-/// 首次启动引导（欢迎 + 权限引导）。V25 起整体放到后台线程执行：
-/// 原实现同步跑在主线程上，AppleScript display dialog / AX 权限弹窗会
-/// 阻塞主线程直至用户响应 → 表现为启动卡彩虹球（beachball）。
+/// 
 static void ShowFirstLaunchGuide(void) {
-    // 必须异步：不阻塞主线程，避免启动卡彩虹球
+    // V25 起后台线程执行：AppleScript display dialog / AX 弹窗不阻塞主线程（避免彩虹球）
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
     @try {
         @autoreleasepool {
@@ -143,19 +141,10 @@ static void ShowFirstLaunchGuide(void) {
     });
 }
 
-/// 尝试把「关于/退出」插入现有主菜单；返回 YES 表示成功。
-static BOOL TryInsertAbout(void) {
+/// +
+static void InsertAboutItem(void) {
     @autoreleasepool {
         NSApplication *app = [NSApplication sharedApplication];
-        NSMenu *mainMenu = [app mainMenu];
-        if (!mainMenu) return NO;
-        NSMenu *appMenu = nil;
-        NSInteger n = [mainMenu numberOfItems];
-        for (NSInteger j = 0; j < n; j++) {
-            NSMenuItem *it = [mainMenu itemAtIndex:j];
-            if ([it submenu]) { appMenu = [it submenu]; break; }
-        }
-        if (!appMenu) { FileLog(@"TryInsertAbout: 无可用应用菜单 (mainMenu items=%ld)", (long)n); return NO; }
 
         NSDictionary *S = LoadStrings();
         NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
@@ -163,44 +152,58 @@ static BOOL TryInsertAbout(void) {
         NSString *aboutTitle = [@"关于 " stringByAppendingString:appName];
         NSString *quitTitle  = [@"退出 " stringByAppendingString:appName];
 
-        BOOL hasAbout = NO, hasQuit = NO;
-        for (NSMenuItem *it in appMenu.itemArray) {
-            if (it.action == @selector(showCustomAbout)) hasAbout = YES;
-            if (it.action == @selector(terminate:)) hasQuit = YES;
-        }
-        if (!hasAbout || !hasQuit) {
-            NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:aboutTitle action:@selector(showCustomAbout) keyEquivalent:@""];
-            [aboutItem setTarget:app];
-            NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:quitTitle action:@selector(terminate:) keyEquivalent:@"q"];
-            [quitItem setTarget:app];
-            if (!hasAbout) {
-                [appMenu insertItem:aboutItem atIndex:0];
-                [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
+        __block NSMenuItem *aboutItem = nil;
+        __block NSMenuItem *quitItem = nil;
+        void (^makeItems)(void) = ^{
+            if (!aboutItem) {
+                aboutItem = [[NSMenuItem alloc] initWithTitle:aboutTitle action:@selector(showCustomAbout) keyEquivalent:@""];
+                [aboutItem setTarget:app];
             }
-            if (!hasQuit) [appMenu addItem:quitItem];
-            FileLog(@"TryInsertAbout: 已插入 about/quit 到菜单「%@」(items=%ld)", appMenu.title, (long)[appMenu numberOfItems]);
-        }
-        return YES;
-    }
-}
+            if (!quitItem) {
+                quitItem = [[NSMenuItem alloc] initWithTitle:quitTitle action:@selector(terminate:) keyEquivalent:@"q"];
+                [quitItem setTarget:app];
+            }
+        };
 
-/// 兜底：始终无主菜单 → 创建全新主菜单（含关于/退出），确保关于一定存在。
-static void InsertAboutFallback(void) {
-    @autoreleasepool {
-        NSApplication *app = [NSApplication sharedApplication];
-        NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
-        if (!appName || [appName length] == 0) appName = @"SilentLauncher";
+        // SwiftUI 应用的主菜单在启动完成后异步构建，Intel/10.15 慢速机器上更晚；
+        // 轮询等待菜单就绪（最多 15 秒），就绪即插入「关于/退出」。
+        for (int i = 0; i < 30; i++) {
+            NSMenu *mainMenu = [app mainMenu];
+            NSMenu *appMenu = nil;
+            if (mainMenu) {
+                NSInteger n = [mainMenu numberOfItems];
+                // 找第一个带 submenu 的菜单项（通常是 App 菜单）
+                for (NSInteger j = 0; j < n; j++) {
+                    NSMenuItem *it = [mainMenu itemAtIndex:j];
+                    if ([it submenu]) { appMenu = [it submenu]; break; }
+                }
+            }
+            if (!mainMenu) { FileLog(@"InsertAboutItem: mainMenu 为 nil (i=%d)", i); }
+            if (appMenu) {
+                BOOL hasAbout = NO, hasQuit = NO;
+                for (NSMenuItem *it in appMenu.itemArray) {
+                    if (it.action == @selector(showCustomAbout)) hasAbout = YES;
+                    if (it.action == @selector(terminate:)) hasQuit = YES;
+                }
+                if (!hasAbout || !hasQuit) {
+                    makeItems();
+                    if (!hasAbout) {
+                        [appMenu insertItem:aboutItem atIndex:0];
+                        [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
+                    }
+                    if (!hasQuit) [appMenu addItem:quitItem];
+                }
+                FileLog(@"InsertAboutItem: 已插入 about/quit (appMenu=「%@」 items=%ld)", appMenu.title, (long)[appMenu numberOfItems]);
+                return; // 插入成功
+            }
+            if (i < 29) usleep(500000);
+        }
+
+        // 兜底：始终无主菜单 → 创建全新主菜单（含关于/退出），确保关于一定存在
+        makeItems();
         NSMenu *menu = [[NSMenu alloc] initWithTitle:@""];
         NSMenuItem *appItem = [[NSMenuItem alloc] initWithTitle:appName action:nil keyEquivalent:@""];
         NSMenu *appMenu = [[NSMenu alloc] initWithTitle:appName];
-        NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:[@"关于 " stringByAppendingString:appName]
-                                                           action:@selector(showCustomAbout)
-                                                    keyEquivalent:@""];
-        [aboutItem setTarget:app];
-        NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:[@"退出 " stringByAppendingString:appName]
-                                                          action:@selector(terminate:)
-                                                   keyEquivalent:@"q"];
-        [quitItem setTarget:app];
         [appMenu addItem:aboutItem];
         [appMenu addItem:[NSMenuItem separatorItem]];
         [appMenu addItem:quitItem];
@@ -208,27 +211,6 @@ static void InsertAboutFallback(void) {
         [menu addItem:appItem];
         [app setMainMenu:menu];
     }
-}
-
-/// 异步分次检查主菜单是否就绪。用 C 函数递归（block 只捕获 int，不捕获 block 指针）：
-/// V25 曾用 block 捕获 block 的递归写法，在 Intel 原生 x86_64 上 dispatch_after
-/// copy 时捕获到失效指针 → EXC_BAD_ACCESS（jmp *0x10(null)）崩溃。
-static void ScheduleAboutCheck(int attempt) {
-    if (attempt >= 30) {
-        InsertAboutFallback();
-        return;
-    }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        if (TryInsertAbout()) return; // 插入成功，结束
-        ScheduleAboutCheck(attempt + 1);
-    });
-}
-
-/// 主菜单就绪后插入「关于/退出」。异步轮询，主线程只做轻量操作（不阻塞、不卡彩虹球）。
-static void InsertAboutItem(void) {
-    if (TryInsertAbout()) return; // 已就绪，一次成功（绝大多数情况）
-    ScheduleAboutCheck(1);
 }
 
 /// 安装新版后迁移旧版配置：把旧名文件夹（开机静默启动器）里用户真实的
@@ -284,7 +266,7 @@ static void MigrateOldConfig(void) {
 
 __attribute__((constructor))
 static void on_load(void) {
-    FileLog(@"=== dylib loaded (V29) ===");
+    FileLog(@"=== dylib loaded (V30) ===");
     // 0) 安装新版后先迁移旧版配置（必须在 App 读取配置之前完成）
     MigrateOldConfig();
 
