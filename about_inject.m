@@ -201,12 +201,44 @@ static BOOL TryInsertAbout(void) {
     }
 }
 
-/// V42 诊断：每 2 秒打印一次主菜单结构（顶层项标题 / submenu / items 数），
-/// 持续约 30 秒，用于还原 macOS 12 上 SwiftUI 菜单构建的真实时序。
+/// V43 兜底：所有退避尝试都失败后，强制创建主菜单（含「关于/退出」）。
+/// 基于 V34/V38 实测 macOS 12 上 SwiftUI 走我们未 hook 的 API 设菜单（hook 完全无效），
+/// 唯一可靠路径就是 `[app setMainMenu:menu]` 强制建。V38 用户实测菜单稳定显示。
+/// 主线程微秒级操作，不阻塞 → 不卡彩虹球。
+static BOOL g_inserted = NO;
+static void BuildFallbackMainMenu(void) {
+    @autoreleasepool {
+        NSApplication *app = [NSApplication sharedApplication];
+        NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
+        if (!appName || [appName length] == 0) appName = @"SilentLauncher";
+        NSMenu *menu = [[NSMenu alloc] initWithTitle:@""];
+        NSMenuItem *appItem = [[NSMenuItem alloc] initWithTitle:appName action:nil keyEquivalent:@""];
+        NSMenu *appMenu = [[NSMenu alloc] initWithTitle:appName];
+        NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:[@"关于 " stringByAppendingString:appName]
+                                                           action:@selector(showCustomAbout)
+                                                    keyEquivalent:@""];
+        [aboutItem setTarget:app];
+        NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:[@"退出 " stringByAppendingString:appName]
+                                                          action:@selector(terminate:)
+                                                   keyEquivalent:@"q"];
+        [quitItem setTarget:app];
+        [quitItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
+        [appMenu addItem:aboutItem];
+        [appMenu addItem:[NSMenuItem separatorItem]];
+        [appMenu addItem:quitItem];
+        [appItem setSubmenu:appMenu];
+        [menu addItem:appItem];
+        [app setMainMenu:menu];
+        FileLog(@"BuildFallbackMainMenu: 已强制创建主菜单（含 about/quit）");
+    }
+}
+
+/// V43 诊断：每 2 秒打印一次主菜单结构，持续约 60 秒（还原 macOS 12 时序）
 static void DiagnoseMenuStructure(int seq) {
-    if (seq >= 15) return; // 15 × 2s = 30s
+    if (seq >= 30) return; // 30 × 2s = 60s
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
+        if (g_inserted) { DiagnoseMenuStructure(seq + 1); return; }
         NSApplication *app = [NSApplication sharedApplication];
         NSMenu *mainMenu = [app mainMenu];
         if (!mainMenu) {
@@ -224,24 +256,37 @@ static void DiagnoseMenuStructure(int seq) {
     });
 }
 
-/// V42：低频退避重插——按递增间隔尝试插入（1s/4s/8s/12s/16s/20s/26s/32s），
-/// 避开 SwiftUI 菜单构建高峰期（macOS 12 实测 submenu 约 10s 才出现），
-/// 构建完成后再插一次成功率高。全程主线程微秒级操作，无 usleep → 不卡彩虹球。
+/// V43：退避重插 + 兜底建主菜单。
+/// 退避序列 1/2/3/4/5/6/8/10 = 39 秒（macOS 12 实测 mainMenu 约 16 秒才非 nil，覆盖常见情况）。
+/// 全部失败 → BuildFallbackMainMenu 强制建主菜单（V38 实测可靠路径）。
+/// 全程主线程微秒级操作，无 usleep → 不卡彩虹球。
 static void ScheduleInsertAttempt(int step) {
-    static const double delays[] = {1.0, 3.0, 4.0, 4.0, 4.0, 4.0, 6.0, 6.0, 8.0};
+    static const double delays[] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0};
     int total = sizeof(delays) / sizeof(delays[0]);
-    if (step >= total) return;
+    if (g_inserted) return;
+    if (step >= total) {
+        FileLog(@"ScheduleInsertAttempt: 全部尝试失败（macOS 12 上 SwiftUI 走我们未 hook 的路径）");
+        BuildFallbackMainMenu();
+        g_inserted = YES;
+        return;
+    }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[step] * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        TryInsertAbout();
+        if (g_inserted) return;
+        if (TryInsertAbout()) {
+            g_inserted = YES;
+            FileLog(@"ScheduleInsertAttempt: step %d 命中插入", step);
+            return;
+        }
         ScheduleInsertAttempt(step + 1);
     });
 }
 
-/// V42：菜单插入 = 1 秒先插 + hook 自动补回（主力）+ 低频退避重插（兜底）。
-/// 无任何 usleep → 主线程零阻塞 → 彩虹球根除。
+/// V43：菜单插入 = 立即试一次 + hook 自动补回（本机有效）+ 退避重插（40s 窗口）+ 兜底建主菜单。
+/// 全程主线程微秒级操作（除 setMainMenu 一次性调用），无 usleep → 不卡彩虹球。
 static void InsertAboutItem(void) {
-    TryInsertAbout(); // 立即试一次（大多数系统第 0 次就绪）
+    g_inserted = NO;
+    if (TryInsertAbout()) { g_inserted = YES; return; }
     ScheduleInsertAttempt(0);
     DiagnoseMenuStructure(0);
 }
