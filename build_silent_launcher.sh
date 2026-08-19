@@ -10,10 +10,12 @@
 #     - 全局静默（globalSilent）默认 true→false：PollSettings.init / ContentView 失败兜底 共 4 处（x86_64 2 + arm64 2）
 #     - 开机自启（launchAtLogin）首次安装默认关闭：ensureLoginItemInstalledOnce 置为 no-op（不再自动注册 LaunchAgent）
 #     - about_inject.dylib 彩虹球修复：ShowFirstLaunchGuide 移后台线程、InsertAboutItem 改异步轮询
-# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.35
+#  5) V36：检测总时长 stepper 步长 10→5 秒（指令立即数补丁，见 patch_stepper_step 注释）
+# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.36
 set -e
+set -o pipefail
 
-VERSION="${1:-1.35}"
+VERSION="${1:-1.36}"
 echo "=== SilentLauncher Build v$VERSION ==="
 
 # 二进制等长替换：原版二进制里硬编码的旧名「开机静默启动器」(21字节 UTF-8)
@@ -129,12 +131,6 @@ PY
 
 # V25：首次安装默认值修正
 #  A) globalSilent 默认 true→false（mov w0,#1 -> mov w0,#0 / movb $1,%al -> movb $0,%al）
-#     arm64: PollSettings.init (+0x8160)、ContentView._settings 失败兜底 (+0x839c)
-#     x86_64: PollSettings.init (+0x5344)、ContentView._settings 失败兜底 (+0xc937)
-#  B) launchAtLogin 首次安装默认关闭：ensureLoginItemInstalledOnce 置为 no-op（直接 ret）
-#     arm64 @+0xcefc（stp...  -> ret 0xd65f03c0）；x86_64 @+0xa410（pushq %rbp 0x55 -> ret 0xc3）
-# V25：首次安装默认值修正
-#  A) globalSilent 默认 true→false（mov w0,#1 -> mov w0,#0 / movb $1,%al -> movb $0,%al）
 #     universal x86_64 slice: PollSettings.init (+0x5344)、ContentView 失败兜底 (+0xc937)
 #     universal arm64   slice: PollSettings.init (+0x8160)、ContentView 失败兜底 (+0x839c)
 #     10.15 单架构 x86_64（模块 main）: PollSettings.init (+0x5bd4)、ContentView 失败兜底 (+0xd3e7)
@@ -194,7 +190,7 @@ PY
 # V36：检测总时长 stepper 步长 10 → 5 秒（V35 数据区 patch 无效，改为指令立即数 patch）
 # 定位方法：反汇编找 Stepper init 调用点（_$s7SwiftUI7StepperV5value2in4step...lufC），
 # 调用前构造 step 参数的指令：
-#   universal x86_64 slice: movabsq $0x4024000000000000（10.0）@ slice 偏移 0x144B8，
+#   universal x86_64 slice: movabsq $0x4024000000000000（10.0）@ slice 偏移 0x104B8（文件偏移 0x144B8），
 #     存入 -0x460(%rbp) 后 leaq 传给 rdx（Stepper #1 检测总时长）
 #     （其他 3 处 movabsq 10.0 是 VStack spacing，不动）
 #   universal arm64   slice: movz x8,#0x4024,lsl#48（10.0）@ slice 偏移 0x12B10，
@@ -204,6 +200,7 @@ PY
 #     同样存 -0x460(%rbp) 传给 rdx
 # 改为 5.0（0x4014000000000000）：movabsq imm 低字节 24 40 -> 14 40；
 #   arm64 movz imm16 0x4024 -> 0x4014（d2e80488 -> d2e80288）
+# ⚠️ 偏移基于 V20 源二进制，若更换源 DMG 需用上述方法重新定位。
 patch_stepper_step() {
   local BIN="$1"
   python3 - "$BIN" <<'PY'
@@ -259,7 +256,7 @@ COPYRIGHT='Copyright © 2026 banqiu. Released under the MIT License.'
 
 # ---- 12 universal ----
 echo "--- [1/2] 12 universal ---"
-MNT_12=$(hdiutil info 2>/dev/null | grep -B1 "$SRC_12" | grep '/Volumes/' | sed 's|.*\(/Volumes/.*\)|\1|')
+MNT_12=$(hdiutil info 2>/dev/null | grep -B1 "$SRC_12" | grep '/Volumes/' | sed 's|.*\(/Volumes/.*\)|\1|') || true
 if [ -z "$MNT_12" ] || [ ! -d "$MNT_12" ]; then
   MNT_12=$(hdiutil attach "$SRC_12" -nobrowse 2>&1 | grep '/Volumes/' | sed 's|.*\(/Volumes/.*\)|\1|')
 fi
@@ -306,7 +303,7 @@ echo "OK 12-silent-launcher-v$VERSION-universal.dmg"
 
 # ---- 10.15 x86_64 ----
 echo "--- [2/2] 10.15 x86_64 ---"
-MNT_15=$(hdiutil info 2>/dev/null | grep -B1 "$SRC_1015" | grep '/Volumes/' | sed 's|.*\(/Volumes/\)|\1|')
+MNT_15=$(hdiutil info 2>/dev/null | grep -B1 "$SRC_1015" | grep '/Volumes/' | sed 's|.*\(/Volumes/\)|\1|') || true
 if [ -z "$MNT_15" ] || [ ! -d "$MNT_15" ]; then
   MNT_15=$(hdiutil attach "$SRC_1015" -nobrowse 2>&1 | grep '/Volumes/' | sed 's|.*\(/Volumes/\)|\1|')
 fi

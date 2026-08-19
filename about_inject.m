@@ -6,7 +6,18 @@
 ///  Resources/strings.txtUTF-8 key=value 
 ///  clang  -mmacosx-version-min=10.15  CFString
 
-/// 诊断日志：写到 ~/Library/Logs/静默启动管理器-inject.log（追加）。
+/// 日志串行队列：FileLog 可能被主线程（InsertAboutItem）与后台线程
+/// （ShowFirstLaunchGuide）同时调用，串行化避免日志行交错/损坏。
+static dispatch_queue_t LogQueue(void) {
+    static dispatch_once_t once;
+    static dispatch_queue_t q;
+    dispatch_once(&once, ^{
+        q = dispatch_queue_create("com.silentlauncher.injectlog", DISPATCH_QUEUE_SERIAL);
+    });
+    return q;
+}
+
+/// 诊断日志：写到 ~/Library/Logs/静默启动管理器-inject.log（追加，串行队列异步写）。
 static void FileLog(NSString *fmt, ...) {
     va_list args; va_start(args, fmt);
     NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
@@ -17,17 +28,19 @@ static void FileLog(NSString *fmt, ...) {
     NSString *path = [dir stringByAppendingPathComponent:@"静默启动管理器-inject.log"];
     NSString *line = [NSString stringWithFormat:@"%@ [pid %d] %@\n", [NSDate date], getpid(), msg];
     NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:path]) {
-        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-        [fm createFileAtPath:path contents:data attributes:nil];
-    } else {
-        NSFileHandle *fh = [NSFileHandle fileHandleForUpdatingAtPath:path];
-        if (fh) {
-            @try { [fh seekToEndOfFile]; [fh writeData:data]; } @catch (NSException *e) {}
-            [fh closeFile];
+    dispatch_async(LogQueue(), ^{
+        NSFileManager *fm = [NSFileManager defaultManager];
+        if (![fm fileExistsAtPath:path]) {
+            [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+            [fm createFileAtPath:path contents:data attributes:nil];
+        } else {
+            NSFileHandle *fh = [NSFileHandle fileHandleForUpdatingAtPath:path];
+            if (fh) {
+                @try { [fh seekToEndOfFile]; [fh writeData:data]; } @catch (NSException *e) {}
+                [fh closeFile];
+            }
         }
-    }
+    });
 }
 
 static NSDictionary *LoadStrings(void) {
@@ -62,7 +75,7 @@ static void ShowCustomAbout(void) {
         @autoreleasepool {
             NSBundle *bundle = [NSBundle mainBundle];
             NSString *appName = [bundle objectForInfoDictionaryKey:@"CFBundleName"] ?: @"SilentLauncher";
-            NSString *version = [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"21";
+            NSString *version = [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"1.0";
 
             // 手工构建干净的关于内容（不依赖模板中的 %@ 防止展开异常）
             NSString *body = [NSString stringWithFormat:
@@ -172,6 +185,8 @@ static BOOL TryInsertAbout(void) {
             [aboutItem setTarget:app];
             NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:quitTitle action:@selector(terminate:) keyEquivalent:@"q"];
             [quitItem setTarget:app];
+            // 必须显式 Command 修饰键：默认 mask=0 会导致普通按键 "q" 直接触发退出
+            [quitItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
             if (!hasAbout) {
                 [appMenu insertItem:aboutItem atIndex:0];
                 [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
@@ -212,6 +227,7 @@ static void InsertAboutItem(void) {
                                                           action:@selector(terminate:)
                                                    keyEquivalent:@"q"];
         [quitItem setTarget:app];
+        [quitItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
         [appMenu addItem:aboutItem];
         [appMenu addItem:[NSMenuItem separatorItem]];
         [appMenu addItem:quitItem];
@@ -274,7 +290,8 @@ static void MigrateOldConfig(void) {
 
 __attribute__((constructor))
 static void on_load(void) {
-    FileLog(@"=== dylib loaded (V30) ===");
+    NSString *ver = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+    FileLog(@"=== dylib loaded (v%@) ===", ver ?: @"?");
     // 0) 安装新版后先迁移旧版配置（必须在 App 读取配置之前完成）
     MigrateOldConfig();
 
@@ -287,6 +304,7 @@ static void on_load(void) {
         addObserverForName:NSApplicationDidFinishLaunchingNotification
                     object:nil queue:nil
                 usingBlock:^(NSNotification *note){
+                    (void)note;
                     FileLog(@"=== NSApplicationDidFinishLaunching 收到 ===");
                     dispatch_async(dispatch_get_main_queue(), ^{
                         ShowFirstLaunchGuide();
