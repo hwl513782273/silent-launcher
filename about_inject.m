@@ -118,11 +118,38 @@ static void ShowFirstLaunchGuide(void) {
     });
 }
 
-/// 调试日志：仅当环境变量 SILENTLAUNCHER_DEBUG=1 时输出（正式版零干扰）
-static void DebugLog(NSString *fmt, ...) {
+/// 诊断日志：写到 ~/Library/Logs/静默启动管理器-inject.log（追加）。
+/// 不依赖环境变量 / launchd 重定向，LaunchAgent 自启场景下也能定位 dylib 是否被加载。
+static void FileLog(NSString *fmt, ...) {
+    va_list args; va_start(args, fmt);
+    NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
+    va_end(args);
+    NSString *home = NSHomeDirectory();
+    if (!home) { NSLog(@"%@", msg); return; }
+    NSString *dir = [home stringByAppendingPathComponent:@"Library/Logs"];
+    NSString *path = [dir stringByAppendingPathComponent:@"静默启动管理器-inject.log"];
+    NSString *line = [NSString stringWithFormat:@"%@ [pid %d] %@\n", [NSDate date], getpid(), msg];
+    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:path]) {
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        [fm createFileAtPath:path contents:data attributes:nil];
+    } else {
+        NSFileHandle *fh = [NSFileHandle fileHandleForUpdatingAtPath:path];
+        if (fh) {
+            @try { [fh seekToEndOfFile]; [fh writeData:data]; } @catch (NSException *e) {}
+            [fh closeFile];
+        }
+    }
+}
+
+/// 控制台日志：仅当环境变量 SILENTLAUNCHER_DEBUG=1 时输出到 stderr（log show 可见）
+static void ConsoleLog(NSString *fmt, ...) {
     if (getenv("SILENTLAUNCHER_DEBUG")) {
         va_list args; va_start(args, fmt);
-        NSLogv(fmt, args); va_end(args);
+        NSString *msg = [[NSString alloc] initWithFormat:fmt arguments:args];
+        va_end(args);
+        NSLog(@"%@", msg);
     }
 }
 
@@ -159,7 +186,7 @@ static BOOL TryInsertAbout(void) {
             }
         }
         if (!appMenu) {
-            DebugLog(@"TryInsertAbout: 无可用应用菜单 (mainMenu items=%ld)", (long)n);
+            FileLog(@"TryInsertAbout: 无可用应用菜单 (mainMenu items=%ld)", (long)n);
             return NO;
         }
 
@@ -178,10 +205,10 @@ static BOOL TryInsertAbout(void) {
                 [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
             }
             if (!hasQuit) [appMenu addItem:quitItem];
-            DebugLog(@"TryInsertAbout: 已插入 about/quit 到菜单「%@」(items=%ld)",
+            FileLog(@"TryInsertAbout: 已插入 about/quit 到菜单「%@」(items=%ld)",
                      appMenu.title, (long)[appMenu numberOfItems]);
         } else {
-            DebugLog(@"TryInsertAbout: 已存在 about/quit，无需插入 (items=%ld)",
+            FileLog(@"TryInsertAbout: 已存在 about/quit，无需插入 (items=%ld)",
                      (long)[appMenu numberOfItems]);
         }
         return YES;
@@ -219,7 +246,7 @@ static void InsertAboutFallback(void) {
 /// copy 时捕获到失效指针 → EXC_BAD_ACCESS（jmp *0x10(null)）崩溃。
 static void ScheduleAboutCheck(int attempt) {
     if (attempt >= 30) {
-        DebugLog(@"ScheduleAboutCheck: 30 次仍未就绪，走兜底");
+        FileLog(@"ScheduleAboutCheck: 30 次仍未就绪，走兜底");
         InsertAboutFallback();
         return;
     }
@@ -308,6 +335,7 @@ static void MigrateOldConfig(void) {
 
 __attribute__((constructor))
 static void on_load(void) {
+    FileLog(@"=== dylib loaded ===");
     // 0) 安装新版后先迁移旧版配置（必须在 App 读取配置之前完成）
     MigrateOldConfig();
 
@@ -315,14 +343,16 @@ static void on_load(void) {
     IMP imp = imp_implementationWithBlock(^{ ShowCustomAbout(); });
     class_addMethod([NSApplication class], @selector(showCustomAbout), imp, "v@:");
 
-    // App  + 
+    // App  +
     [[NSNotificationCenter defaultCenter]
         addObserverForName:NSApplicationDidFinishLaunchingNotification
                     object:nil queue:nil
                 usingBlock:^(NSNotification *note){
+                    FileLog(@"=== NSApplicationDidFinishLaunching 收到 ===");
                     dispatch_async(dispatch_get_main_queue(), ^{
                         ShowFirstLaunchGuide();
                         InsertAboutItem();
                     });
                 }];
+    FileLog(@"=== on_load 完成，监听已注册 ===");
 }
