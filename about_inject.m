@@ -198,42 +198,15 @@ static BOOL TryInsertAbout(void) {
     }
 }
 
-/// V34：先让主线程自由运行 1 秒，给 SwiftUI 构建菜单的时间（不阻塞 → 不卡彩虹球）。
-/// 1 秒后若 submenu 已就绪则立即插入；否则回退 V30/V33 同步 usleep 轮询（阻塞等待，
-/// 保证菜单显示不被覆盖）。兜底创建主菜单。
+/// V39：菜单插入 = 1 秒空闲先插（最快路径）+ hook 自动补回（主力，见下方 swizzle）。
+/// 已移除 V34 的同步 usleep 轮询兜底——V38-beta 用户实测 hook 能稳定保持菜单显示，
+/// 阻塞轮询只会卡彩虹球且不再必要（菜单一旦被 SwiftUI 建出，hook 即自动补回）。
+/// 主线程零阻塞 → 彩虹球根除。
 static void InsertAboutItem(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        if (TryInsertAbout()) return; // 空闲期 SwiftUI 已完成构建 → 立即插入，不卡
-
-        // 回退：同步轮询（最多 15 秒），保证菜单显示
-        for (int i = 0; i < 30; i++) {
-            if (TryInsertAbout()) return;
-            usleep(500000);
-        }
-        FileLog(@"InsertAboutItem: 30 次轮询后仍未就绪，兜底创建主菜单");
-        // 兜底：创建全新主菜单（含关于/退出）
-        NSApplication *app = [NSApplication sharedApplication];
-        NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
-        if (!appName || [appName length] == 0) appName = @"SilentLauncher";
-        NSMenu *menu = [[NSMenu alloc] initWithTitle:@""];
-        NSMenuItem *appItem = [[NSMenuItem alloc] initWithTitle:appName action:nil keyEquivalent:@""];
-        NSMenu *appMenu = [[NSMenu alloc] initWithTitle:appName];
-        NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:[@"关于 " stringByAppendingString:appName]
-                                                           action:@selector(showCustomAbout)
-                                                    keyEquivalent:@""];
-        [aboutItem setTarget:app];
-        NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:[@"退出 " stringByAppendingString:appName]
-                                                          action:@selector(terminate:)
-                                                   keyEquivalent:@"q"];
-        [quitItem setTarget:app];
-        [quitItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
-        [appMenu addItem:aboutItem];
-        [appMenu addItem:[NSMenuItem separatorItem]];
-        [appMenu addItem:quitItem];
-        [appItem setSubmenu:appMenu];
-        [menu addItem:appItem];
-        [app setMainMenu:menu];
+        // 1 秒空闲期 SwiftUI 通常已建好菜单 → 直接插入（幂等）；失败也无妨，hook 兜底
+        TryInsertAbout();
     });
 }
 
