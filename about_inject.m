@@ -237,6 +237,108 @@ static void InsertAboutItem(void) {
     });
 }
 
+/// V38-beta（实验）方案 A：hook NSMenu 修改方法，SwiftUI 每次重建菜单后自动补回
+/// 「关于/退出」。核心思路：不猜 SwiftUI 的重建时机，而是监听其每次 add/insert/
+/// remove 动作，若应用菜单缺项则立即幂等补回 → 菜单永远存在且主线程零阻塞。
+/// 与 V34 的「1 秒先插 + 阻塞兜底」叠加为三层保险。
+
+static BOOL g_reinserting = NO;
+
+/// 确保指定菜单包含「关于/退出」（幂等；防递归通过 g_reinserting 标志）
+static void EnsureAboutQuitInMenu(NSMenu *appMenu) {
+    if (g_reinserting) return;
+    g_reinserting = YES;
+    @autoreleasepool {
+        NSApplication *app = [NSApplication sharedApplication];
+        NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
+        if (!appName || [appName length] == 0) appName = @"SilentLauncher";
+        NSString *aboutTitle = [@"关于 " stringByAppendingString:appName];
+        NSString *quitTitle  = [@"退出 " stringByAppendingString:appName];
+
+        BOOL hasAbout = NO, hasQuit = NO;
+        for (NSMenuItem *it in appMenu.itemArray) {
+            if (it.action == @selector(showCustomAbout)) hasAbout = YES;
+            if (it.action == @selector(terminate:)) hasQuit = YES;
+        }
+        if (!hasAbout || !hasQuit) {
+            NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:aboutTitle action:@selector(showCustomAbout) keyEquivalent:@""];
+            [aboutItem setTarget:app];
+            NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:quitTitle action:@selector(terminate:) keyEquivalent:@"q"];
+            [quitItem setTarget:app];
+            [quitItem setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
+            if (!hasAbout) {
+                [appMenu insertItem:aboutItem atIndex:0];
+                [appMenu insertItem:[NSMenuItem separatorItem] atIndex:1];
+            }
+            if (!hasQuit) [appMenu addItem:quitItem];
+            FileLog(@"EnsureAboutQuit: 自动补回 about/quit (items=%ld)", (long)[appMenu numberOfItems]);
+        }
+    }
+    g_reinserting = NO;
+}
+
+/// 任意 NSMenu 被修改后回调：定位应用菜单（mainMenu 第一个带 submenu 的顶层项），
+/// 若被修改的正是应用菜单或主菜单，则确保关于/退出存在。
+static void MenuDidMutate(NSMenu *menu) {
+    if (g_reinserting) return; // 我们自己补回时不再触发
+    NSApplication *app = [NSApplication sharedApplication];
+    NSMenu *mainMenu = [app mainMenu];
+    if (!mainMenu) return;
+    NSMenu *appMenu = nil;
+    for (NSMenuItem *it in mainMenu.itemArray) {
+        if ([it submenu]) { appMenu = [it submenu]; break; }
+    }
+    if (!appMenu) return;
+    if (menu == mainMenu || menu == appMenu) {
+        EnsureAboutQuitInMenu(appMenu);
+    }
+}
+
+// 保存原实现
+static void (*orig_menu_addItem)(id, SEL, id);
+static void (*orig_menu_insertItem)(id, SEL, id, NSInteger);
+static void (*orig_menu_removeItemAtIndex)(id, SEL, NSInteger);
+static void (*orig_menu_removeAllItems)(id, SEL);
+static void (*orig_menu_setSubmenu)(id, SEL, NSMenu *, NSMenuItem *);
+
+static void my_menu_addItem(id self, SEL _cmd, id item) {
+    orig_menu_addItem(self, _cmd, item);
+    MenuDidMutate(self);
+}
+static void my_menu_insertItem(id self, SEL _cmd, id item, NSInteger index) {
+    orig_menu_insertItem(self, _cmd, item, index);
+    MenuDidMutate(self);
+}
+static void my_menu_removeItemAtIndex(id self, SEL _cmd, NSInteger index) {
+    orig_menu_removeItemAtIndex(self, _cmd, index);
+    MenuDidMutate(self);
+}
+static void my_menu_removeAllItems(id self, SEL _cmd) {
+    orig_menu_removeAllItems(self, _cmd);
+    MenuDidMutate(self);
+}
+static void my_menu_setSubmenu(id self, SEL _cmd, NSMenu *submenu, NSMenuItem *item) {
+    orig_menu_setSubmenu(self, _cmd, submenu, item);
+    MenuDidMutate(self);
+}
+
+/// swizzle NSMenu 修改方法；失败静默（不影响主功能）
+static void SwizzleMenuMethods(void) {
+    Class cls = [NSMenu class];
+    Method m;
+#define SWZ(SELNAME, VAR, FUNC) \
+    m = class_getInstanceMethod(cls, @selector(SELNAME)); \
+    if (m) { VAR = (void *)method_getImplementation(m); \
+             class_replaceMethod(cls, @selector(SELNAME), (IMP)FUNC, method_getTypeEncoding(m)); }
+    SWZ(addItem:, orig_menu_addItem, my_menu_addItem)
+    SWZ(insertItem:atIndex:, orig_menu_insertItem, my_menu_insertItem)
+    SWZ(removeItemAtIndex:, orig_menu_removeItemAtIndex, my_menu_removeItemAtIndex)
+    SWZ(removeAllItems, orig_menu_removeAllItems, my_menu_removeAllItems)
+    SWZ(setSubmenu:forItem:, orig_menu_setSubmenu, my_menu_setSubmenu)
+#undef SWZ
+    FileLog(@"SwizzleMenuMethods: NSMenu 修改方法已 hook (V38-beta)");
+}
+
 /// 安装新版后迁移旧版配置：把旧名文件夹（开机静默启动器）里用户真实的
 /// settings.json / config.json 继承到新名文件夹（静默启动管理器），
 /// 随后把旧文件夹改名为 .old（保留可恢复，且不再被 App 读取）。
@@ -298,6 +400,9 @@ static void on_load(void) {
     // showCustomAbout  NSApplication
     IMP imp = imp_implementationWithBlock(^{ ShowCustomAbout(); });
     class_addMethod([NSApplication class], @selector(showCustomAbout), imp, "v@:");
+
+    // V38-beta：hook NSMenu 修改方法，SwiftUI 重建菜单后自动补回关于/退出
+    SwizzleMenuMethods();
 
     // App  + 
     [[NSNotificationCenter defaultCenter]
