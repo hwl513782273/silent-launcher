@@ -10,10 +10,10 @@
 #     - 全局静默（globalSilent）默认 true→false：PollSettings.init / ContentView 失败兜底 共 4 处（x86_64 2 + arm64 2）
 #     - 开机自启（launchAtLogin）首次安装默认关闭：ensureLoginItemInstalledOnce 置为 no-op（不再自动注册 LaunchAgent）
 #     - about_inject.dylib 彩虹球修复：ShowFirstLaunchGuide 移后台线程、InsertAboutItem 改异步轮询
-# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.25
+# 用法: ./build_silent_launcher.sh [版本号]   # 默认 1.26
 set -e
 
-VERSION="${1:-1.25}"
+VERSION="${1:-1.26}"
 echo "=== SilentLauncher Build v$VERSION ==="
 
 # 二进制等长替换：原版二进制里硬编码的旧名「开机静默启动器」(21字节 UTF-8)
