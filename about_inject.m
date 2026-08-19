@@ -186,27 +186,59 @@ static BOOL TryInsertAbout(void) {
     }
 }
 
-/// 插入「关于/退出」。V31：主线程快速尝试一次；若菜单未就绪，后台线程每 0.5s 轮询
-/// （usleep 在后台，主线程自由 → 不卡彩虹球），就绪后回主线程插入（幂等）。
-/// 最多等 15s，仍不就绪则主线程兜底创建主菜单。
+/// 判断主菜单是否「稳定」：连续 stableCount 次（每次间隔）检查到
+/// 存在带 submenu 的菜单项且 submenu 条目数不变 → SwiftUI 菜单构建完成。
+/// 避免在 SwiftUI 构建中途插入后被重建覆盖（macOS 12 Intel 的坑）。
+static BOOL IsMainMenuStable(void) {
+    static int stableCount = 0;
+    static NSInteger lastCount = -1;
+    NSApplication *app = [NSApplication sharedApplication];
+    NSMenu *mainMenu = [app mainMenu];
+    if (!mainMenu) { stableCount = 0; lastCount = -1; return NO; }
+    NSMenu *appMenu = nil;
+    NSInteger n = [mainMenu numberOfItems];
+    for (NSInteger j = 0; j < n; j++) {
+        NSMenuItem *it = [mainMenu itemAtIndex:j];
+        if ([it submenu]) { appMenu = [it submenu]; break; }
+    }
+    if (!appMenu) { stableCount = 0; lastCount = -1; return NO; }
+    NSInteger cnt = [appMenu numberOfItems];
+    if (cnt == lastCount) {
+        stableCount++;
+        if (stableCount >= 3) { stableCount = 0; lastCount = -1; return YES; }
+    } else {
+        stableCount = 1;
+        lastCount = cnt;
+    }
+    return NO;
+}
+
+/// 插入「关于/退出」。V32：后台线程轮询（usleep 在后台 → 主线程自由 → 不卡彩虹球），
+/// 等 mainMenu「稳定」（连续 3 次 submenu 条目数不变 → SwiftUI 构建完成）后，
+/// 回主线程幂等插入，插入后再 3 次 × 1s 确认（防覆盖）。
+/// 最多等 20s，仍不就绪则主线程兜底创建主菜单。
 static void InsertAboutItem(void) {
-    // 大多数情况第 0 次就绪（V24 验证）
     __block BOOL done = NO;
     void (^tryMain)(void) = ^{
         if (TryInsertAbout()) done = YES;
     };
+
+    // 第一轮：主线程直接尝试（已就绪则立即插入，最快路径）
     tryMain();
     if (done) return;
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        for (int i = 0; i < 30 && !done; i++) {
-            usleep(500000); // 后台睡眠，主线程自由运行
-            dispatch_async(dispatch_get_main_queue(), ^{ tryMain(); });
+        for (int i = 0; i < 40 && !done; i++) { // 40 × 0.5s = 20s 上限
+            usleep(500000);
+            // 稳定性判断与插入都在主线程（NSMenu 非线程安全）
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!done && IsMainMenuStable()) tryMain();
+            });
         }
         if (!done) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (!done) {
-                    FileLog(@"InsertAboutItem: 30 次轮询后仍未就绪，兜底创建主菜单");
+                    FileLog(@"InsertAboutItem: 40 次轮询后主菜单未稳定，兜底创建主菜单");
                     // 兜底：创建全新主菜单（含关于/退出）
                     NSApplication *app = [NSApplication sharedApplication];
                     NSString *appName = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleName"];
@@ -232,6 +264,20 @@ static void InsertAboutItem(void) {
                 }
             });
         }
+    });
+
+    // 插入成功后的确认：幂等重插 3 次 × 1s，防 SwiftUI 延迟重建覆盖
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        tryMain();
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        tryMain();
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        tryMain();
     });
 }
 
